@@ -1,0 +1,32 @@
+{
+  "port": 8767,
+  "llm_api_url": "https://api.ant-ling.com/v1",
+  "llm_model": "Ling-3.0-flash",
+  "_speed": {
+    "max_tokens": 2048,
+    "force_reasoning_effort": "none",
+    "force_max_tokens_on_reasoning": true,
+    "extract_cache_ttl_sec": 3600,
+    "extract_cache_max": 256,
+    "async_default": false,
+    "coalesce_enabled": true,
+    "coalesce_default_profile": "default",
+    "coalesce_profiles": {
+      "default":  {"window_sec": 12, "idle_sec": 4,   "max_parts": 8,  "max_chars": 2000},
+      "tech":     {"window_sec": 8,  "idle_sec": 2.5, "max_parts": 6,  "max_chars": 1500},
+      "intimate": {"window_sec": 20, "idle_sec": 8,   "max_parts": 12, "max_chars": 3000}
+    },
+    "coalesce_profile_by_source": {
+      "hermes": "tech",
+      "hermes_memory": "tech",
+      "feishu": "default",
+      "diary": "intimate"
+    },
+    "capacity_merge_async": true,
+    "fastpath_enabled": true,
+    "async_sources": [
+      "mem0_sync", "hermes", "hermes_memory", "feishu", "chat",
+      "auto_memory", "memory_md", "diary", "treasure"
+    ]
+  }
+}
