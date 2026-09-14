@@ -481,23 +481,57 @@ class HybridRecall:
                         })
                     return results
 
-                # 限定 content 列检索：用户未显式指定列（无冒号）时，将查询包装为
-                # content 列短语（多词/特殊字符双引号安全转义），避免命中
-                # category/source 等元数据列导致的无关结果。
+                # 限定 content 列检索：用户未显式指定列（无冒号）时，
+                # 采用两段式策略：
+                # 1. 优先尝试精确短语匹配 content : "{escaped}"
+                # 2. 若精确短语为 0 命中（常见于自然语言长句），自动回退为关键词/词元 OR 召回，
+                #    彻底消除长句提问时 FTS 候选恒为 0 导致的单引擎跛脚问题。
                 if ":" in q:
                     fts_query = q
+                    fts_candidates = [fts_query]
                 else:
                     escaped = q.replace('"', '""')
-                    fts_query = f'content : "{escaped}"'
+                    phrase_query = f'content : "{escaped}"'
+                    
+                    # 构造关键词 OR 兜底查询
+                    import re
+                    en_words = re.findall(r'[a-zA-Z0-9_]{2,}', q)
+                    cn_chunks = re.findall(r'[\u4e00-\u9fa5]+', q)
+                    raw_terms = list(en_words)
+                    for chunk in cn_chunks:
+                        if len(chunk) == 3 or len(chunk) == 4:
+                            raw_terms.append(chunk)
+                        elif len(chunk) > 4:
+                            for idx in range(len(chunk) - 2):
+                                raw_terms.append(chunk[idx:idx+3])
+                    stopwords = {'为什么', '怎么', '什么', '可以', '这个', '那个', '因为', '所以', '如果', '但是', '以前', '明明', '显示', '用户', '助手'}
+                    filtered_terms = [t for t in dict.fromkeys(raw_terms) if t not in stopwords and len(t) >= 2]
+                    # 优先满足 trigram 的项（长>=3 或 英文/数字）
+                    trigram_terms = [t for t in filtered_terms if len(t) >= 3 or re.match(r'^[a-zA-Z0-9_]+$', t)]
+                    use_terms = trigram_terms if trigram_terms else filtered_terms
+                    if use_terms:
+                        top_terms = use_terms[:8]
+                        fallback_clause = ' OR '.join(f'"{t}"' for t in top_terms)
+                        fallback_query = f'content : ({fallback_clause})'
+                        fts_candidates = [phrase_query, fallback_query]
+                    else:
+                        fts_candidates = [phrase_query]
 
-                # 真实命中总数（不受 LIMIT 截断影响），用于绝对量度 hit_factor
-                total_hits = cur.execute(
-                    """SELECT count(*) FROM memories_fts f
-                       JOIN memories m ON f.rowid = m.id
-                       WHERE memories_fts MATCH ? AND m.user_id = ?
-                         AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')""",
-                    (fts_query, user_id),
-                ).fetchone()[0]
+                total_hits = 0
+                fts_query = fts_candidates[0]
+                for candidate_query in fts_candidates:
+                    cnt = cur.execute(
+                        """SELECT count(*) FROM memories_fts f
+                           JOIN memories m ON f.rowid = m.id
+                           WHERE memories_fts MATCH ? AND m.user_id = ?
+                             AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')""",
+                        (candidate_query, user_id),
+                    ).fetchone()[0]
+                    if cnt > 0:
+                        total_hits = cnt
+                        fts_query = candidate_query
+                        break
+
                 if not total_hits:
                     return []
                 cur.execute(
@@ -702,7 +736,8 @@ class HybridRecall:
         网络请求在锁外执行，避免多线程下对同一文本重复调 embedding API。
         双保险：Voyage 异常/限流/余额用尽 → 静默切 bge-m3 重试，LRU 缓存命中率高时几乎零开销。
         """
-        key = hashlib.sha256(f"{input_type or "document"}:{text}".encode("utf-8")).hexdigest()
+        input_mode = input_type or "document"
+        key = hashlib.sha256(f"{input_mode}:{text}".encode("utf-8")).hexdigest()
         with self._embed_lock:
             entry = self._embed_cache.get(key)
             if entry:

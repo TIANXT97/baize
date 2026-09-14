@@ -278,6 +278,14 @@ class AutoDream:
                             f"AutoDream: LLM superseded id {sid} not in current batch, dropped"
                         )
                         continue
+                    # 铁律保护：绝对禁止自动废弃核心资产轨道（identity / preference / rule）
+                    target_mem = next((m for m in batch if m["id"] == sid), None)
+                    if target_mem and target_mem.get("lane") in ("identity", "preference", "rule"):
+                        log.warning(
+                            f"AutoDream: Refusing to supersede protected lane '{target_mem.get('lane')}' for id {sid}"
+                        )
+                        continue
+
                     if sid not in llm_superseded:
                         llm_superseded.add(sid)
                         if self._mark_superseded(sid, "LLM: duplicate", user_id):
