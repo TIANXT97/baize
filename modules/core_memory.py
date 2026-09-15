@@ -2,7 +2,6 @@
 import sqlite3
 import logging
 from typing import Dict, Optional
-from datetime import datetime
 
 log = logging.getLogger("baize")
 
@@ -101,20 +100,3 @@ class CoreMemory:
         conn.close()
         log.info(f"CoreMemory block '{block_name}' updated for user '{user_id}' ({len(content)} chars)")
         return True
-
-    def format_for_injection(self) -> str:
-        """Format core memory blocks for system prompt injection."""
-        blocks = self.get_all()
-        parts = []
-        for block_name, data in blocks.items():
-            content = data.get("content", "").strip()
-            if content:
-                label = {
-                    "user_profile": "User Profile",
-                    "current_project": "Current Project",
-                    "key_decisions": "Key Decisions",
-                }.get(block_name, block_name)
-                parts.append(f"[{label}]\n{content}")
-        if parts:
-            return "[CoreMemory]\n" + "\n\n".join(parts)
-        return ""

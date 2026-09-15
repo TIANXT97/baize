@@ -3,7 +3,6 @@ import re
 import sqlite3
 import logging
 from typing import List, Dict, Optional, Tuple
-from datetime import datetime
 
 log = logging.getLogger("baize")
 
@@ -158,7 +157,7 @@ class EvolutionTracker:
         elif has_flip and len(common_topics) >= 2:
             # challenges: flip present but weak evidence
             confidence = min(0.85, jaccard * 0.85)
-            return "challenges", round(confidence, 2), f"极性翻转但话题少"
+            return "challenges", round(confidence, 2), "极性翻转但话题少"
         return None, 0.0, ""
 
     def _mark_superseded(self, memory_id: int, reason: str, source_id: int,

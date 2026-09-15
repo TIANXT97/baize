@@ -7,7 +7,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 log = logging.getLogger("baize")
 

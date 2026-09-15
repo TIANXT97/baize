@@ -172,6 +172,9 @@ class AutoDream:
                     continue
                 sim = self._jaccard_similarity(mem["content"], other["content"])
                 if sim > 0.9:
+                    # 铁律保护：绝对禁止自动废弃核心资产轨道（identity / preference / rule）
+                    if other.get("lane") in ("identity", "preference", "rule"):
+                        continue
                     rule_superseded.add(other["id"])
                     if self._mark_superseded(
                         other["id"],
@@ -595,17 +598,6 @@ class AutoDream:
             )
             owned.update(r[0] for r in cur.fetchall())
         return owned
-
-    @staticmethod
-    def _ids_owned_by(conn, memory_ids, user_id: str) -> bool:
-        """批量反查：给定 memory_ids 是否全部属于 user_id（D3）。
-
-        C8: 内部委托 _owned_ids，避免重复查询逻辑。
-        """
-        if not memory_ids:
-            return False
-        owned = AutoDream._owned_ids(conn, memory_ids, user_id)
-        return all(i in owned for i in memory_ids)
 
     def _store_candidates(self, candidates: List[Dict], user_id: str = "default"):
         """Persist high-similarity pairs to the *merge_suggestions* table.

@@ -35,7 +35,7 @@ EMBED_MODEL = VOYAGE_MODEL
 EMBED_DIM = 1024
 
 # bge-m3 L2 distance empirical maximum.
-# Observed L2 distances for bge-m3 range ~0.0 (identical) to ~200.0 (dissimilar).
+# Observed L2 distances for bge-m3 range ~0.0 (identical) to ~2.0 (dissimilar).
 # Used to normalise distance into a 0-1 similarity score via 1.0 - distance / MAX_L2_DISTANCE.
 # This is an empirical value, not a theoretical bound — bge-m3 embeddings are not
 # strictly normalised to unit length, so the max distance is data-dependent.
@@ -286,7 +286,6 @@ class HybridRecall:
 
         # P1-2: 图谱多跳扩展 — 沿 knowledge_evolution 关系边召回间接关联记忆
         t_graph = time.perf_counter()
-        graph_expanded_count = 0
         try:
             if self.evolution is None:
                 from modules.evolution import EvolutionTracker
@@ -393,27 +392,6 @@ class HybridRecall:
             return {}
         finally:
             conn.close()
-
-    def _get_memory(self, mem_id: int, user_id: str) -> Optional[Dict]:
-        """Fetch a single memory row by id (for graph expansion)."""
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout = 30000")
-        conn.row_factory = sqlite3.Row
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT id, content, category, lane, importance, created_at "
-                "FROM memories WHERE id = ? AND user_id = ?",
-                (mem_id, user_id),
-            )
-            row = cur.fetchone()
-            if row:
-                return dict(row)
-        except Exception:
-            pass
-        finally:
-            conn.close()
-        return None
 
     def _fts_search(self, query: str, user_id: str, limit: int) -> List[Dict]:
         """SQLite FTS5 trigram search — 相关度 = 绝对量度 × 位次衰减，再乘衰减。

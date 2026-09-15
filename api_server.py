@@ -178,8 +178,38 @@ def read_key(path, env_name=None):
             return f.read().strip()
     return ""
 
+def read_dotenv_key(env_name, dotenv_path="/root/.hermes/.env"):
+    """从 .env 文件读指定变量（模型与记忆共用同一个上游网关 key 时的正路）。
+
+    2026-09-15：主 LLM 换到 10router 后，钥匙存在 Hermes 的 .env 里，
+    不在 baize 的 systemd 环境里 —— 故须支持按变量名从 .env 取值。
+    """
+    if not env_name:
+        return ""
+    val = os.environ.get(env_name, "").strip()
+    if val:
+        return val
+    try:
+        if os.path.exists(dotenv_path):
+            with open(dotenv_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    if k.strip() == env_name:
+                        return v.strip().strip('"').strip("'")
+    except Exception as e:
+        log.warning(f"read_dotenv_key failed for {env_name}: {e}")
+    return ""
+
 embed_key = read_key(EMBED_KEY_PATH, "BAIZE_EMBED_KEY")
-llm_key = read_key(LLM_KEY_PATH, "BAIZE_LLM_KEY") or os.environ.get("LLM_API_KEY", "")
+# 主键：优先 config 的 llm_key_env（可指向 .env，如 10ROUTER_API_KEY），
+# 否则回退 systemd 注入的 BAIZE_LLM_KEY / 文件
+_primary_key_env = os.environ.get("BAIZE_LLM_MAIN_KEY_ENV", "") or config.get("llm_key_env", "")
+llm_key = (read_dotenv_key(_primary_key_env) if _primary_key_env else "") \
+          or read_key(LLM_KEY_PATH, "BAIZE_LLM_KEY") \
+          or os.environ.get("LLM_API_KEY", "")
 
 # ===== Initialize modules =====
 init_db()
@@ -203,8 +233,26 @@ recall = HybridRecall(
 ) if embed_key else None
 extract_cache_ttl_sec = _speed_config.get("extract_cache_ttl_sec", 3600)
 extract_cache_max = _speed_config.get("extract_cache_max", 256)
+# 2026-09-15：超时/上限可配 + 备用 LLM 端点（主端点整链失败时逐级降级，
+# 避免历史 15s 硬超时把慢响应判死 → 静默灌原文垃圾）
+extract_timeout_sec = int(_speed_config.get("extract_timeout_sec", 30))
+extract_max_tokens = int(_speed_config.get("max_tokens", 2048))
+_fallbacks = []
+for _fb in (_speed_config.get("llm_fallbacks") or []):
+    if not isinstance(_fb, dict):
+        continue
+    _fb_key = _fb.get("api_key") or read_dotenv_key(_fb.get("key_env", "")) \
+              or os.environ.get(_fb.get("key_env", ""), "")
+    if _fb.get("api_url") and _fb_key and _fb.get("model"):
+        _fallbacks.append({"api_url": _fb["api_url"], "api_key": _fb_key,
+                           "model": _fb["model"]})
+        log.info(f"LLM fallback registered: {_fb['model']} @ {_fb['api_url']}")
+    else:
+        log.warning(f"LLM fallback skipped (incomplete config): {_fb.get('model')}")
 extractor = LLMExtractor(api_url=LLM_API_URL, api_key=llm_key, model=LLM_MODEL,
-                          cache_ttl_sec=extract_cache_ttl_sec, cache_max=extract_cache_max) if llm_key else None
+                          cache_ttl_sec=extract_cache_ttl_sec, cache_max=extract_cache_max,
+                          timeout_sec=extract_timeout_sec, max_tokens=extract_max_tokens,
+                          fallbacks=_fallbacks) if llm_key else None
 
 # Coalesce with auto-flush callback
 def on_wave_flush(messages, profile, user_id="default"):
@@ -304,12 +352,12 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
                 (user_id,),
             ).fetchone()
             lines = [ln for ln in (row[0] or "").split("\n") if ln.strip()]
-            # 矛盾清洗：新权威事实剔除已有矛盾行（示例：身份冲突对冲清洗）
+            # 矛盾清洗：新权威事实剔除已有矛盾行
             for txt in new_items:
-                if "用户是男" in txt:
-                    lines = [ln for ln in lines if "用户是女" not in ln]
-                elif "用户是女" in txt:
-                    lines = [ln for ln in lines if "用户是男" not in ln]
+                if "洋芋是男" in txt:
+                    lines = [ln for ln in lines if "洋芋是女" not in ln]
+                elif "洋芋是女" in txt:
+                    lines = [ln for ln in lines if "洋芋是男" not in ln]
             added = 0
             for txt in new_items:
                 if txt in lines:
@@ -348,16 +396,32 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
         facts.append(fp_result)
 
     # Try LLM extraction for longer text
+    llm_failed = False
+    llm_fail_reason = ""
     if extractor and len(text) > 20:
         try:
             llm_facts = extractor.extract(text, source=source)
             facts.extend(llm_facts)
         except Exception as e:
-            log.warning(f"LLM extraction failed: {e}")
+            llm_failed = True
+            llm_fail_reason = str(e)
+            log.error(f"LLM extraction unavailable, refusing raw-text fallback: {e}")
 
     if not facts:
-        # Fallback: store raw text as general fact
+        # 2026-09-15 修复：只有"模型确实答了但确认无事实"才允许兜底写原文。
+        # 模型链全挂时（llm_failed）绝不写原文——否则会把整段对话当一条记忆
+        # 悄悄灌进库（历史 882 条 58 万字垃圾的根源），且日志无痕。
+        if llm_failed:
+            log.error(
+                f"Skip store: LLM chain unavailable for source={source} "
+                f"(would have written raw text as fallback). reason={llm_fail_reason}"
+            )
+            return []
         if len(text.strip()) >= 5:
+            log.warning(
+                f"LLM returned 0 facts (model answered, no facts found) — "
+                f"storing raw text as fallback fact, source={source}, len={len(text.strip())}"
+            )
             facts = [{"fact": text.strip(), "category": "general", "importance": 0.3, "source": "fallback"}]
 
     if not facts:
@@ -369,8 +433,31 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     # P2-1/D3: embedding 去重移出写事务——find_duplicate 内部发起外部 HTTP
     # 请求（Voyage/bge，可能耗时数十秒），绝不能在持有 SQLite 写锁时执行。
     # 进入写事务前先完成全部去重，得到纯净的 unique_facts 列表。
+    # 2026-09-15 补闸：字面全等 SQL 直查兜底。find_duplicate 走向量最近邻，
+    # 早期无向量条目（Voyage 换装前入库）/embedding API 失败时拦不住同句重写
+    # （实测"用户叫TIAN"家族攒出 14 条字面/近字面重复）。零 API 成本。
+    # 2026-09-15 复审修正：单连接批量 IN 查询（同文件 _get_memories_by_ids 样板），
+    # 不再每条 fact 开一次连接。
+    exact_dup_ids = {}
+    stripped_texts = [(f, (f["fact"] or "").strip()) for f in facts]
+    texts = [t for _, t in stripped_texts if t]
+    if texts:
+        try:
+            with get_db() as conn:
+                ph = ",".join("?" * len(texts))
+                for rid, rtext in conn.execute(
+                    f"SELECT id, content FROM memories WHERE content IN ({ph}) AND user_id = ?",
+                    texts + [user_id],
+                ):
+                    exact_dup_ids.setdefault(rtext, rid)
+        except Exception as e:
+            log.warning(f"Exact-text dedup check failed: {e}")
     unique_facts = []
-    for fact in facts:
+    for fact, txt in stripped_texts:
+        hit_id = exact_dup_ids.get(txt) if txt else None
+        if hit_id:
+            log.info(f"Exact-text dedup skip: #{hit_id} :: {txt[:40]}")
+            continue
         if recall:
             try:
                 dup = recall.find_duplicate(fact["fact"], user_id)
@@ -570,7 +657,7 @@ if pending:
         _replay_wal_pending(wal, pending)
 
 # ===== FastAPI app =====
-app = FastAPI(title="白泽 (Bai Ze)", version="1.4.1")
+app = FastAPI(title="白泽 (Bai Ze)", version="1.4.2")
 
 # P2a: 本地可视化页浏览器直连需 CORS（本地服务，allow all）
 from fastapi.middleware.cors import CORSMiddleware
@@ -594,11 +681,6 @@ class SearchRequest(BaseModel):
     limit: int = 5
     # E3: 显式检索意图旁路——插件 baize_search 工具调用传 True 时跳过门控
     skip_gate: bool = False
-
-class FactRequest(BaseModel):
-    category: str = "general"
-    content: str
-    source: str = "manual"
 
 # --- Endpoints ---
 @app.get("/health")
@@ -642,7 +724,7 @@ def health():
     return {
         "status": "ok" if not degraded else "degraded",
         "service": "白泽 (Bai Ze)",
-        "version": "1.4.1-baize",
+        "version": "1.4.2-baize",
         "modules": {
             "gate": True,
             "fastpath": True,
@@ -679,7 +761,7 @@ def memory_health():
             evo = {}
     return {
         "status": "ok",
-        "version": "1.4.1-baize",
+        "version": "1.4.2-baize",
         "report": {
             "lane_distribution": lane_dist,
             "state_distribution": state_dist,

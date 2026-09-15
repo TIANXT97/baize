@@ -103,7 +103,8 @@ pip install -r requirements.txt
 ### 2. 配置环境变量
 ```bash
 cp .env.example .env
-# 编辑填入你的 API Key (推荐使用百灵免费 Ling-3.0-flash 与 Voyage AI 200M 免费额度)
+# 编辑填入你的 API Key (提取器支持主/备双链自动降级，任意 OpenAI 兼容端点均可；
+# 例：主用免费羊毛模型 + 备用 Ling-3.0-flash(百灵) / Voyage AI 200M 免费额度做向量)
 ```
 
 ### 3. 启动服务

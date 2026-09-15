@@ -26,7 +26,6 @@ class FastPath:
         for pattern, category, lane, group in FAST_PATTERNS:
             m = re.search(pattern, msg)
             if m:
-                value = m.group(group).strip() if group else m.group(0).strip()
                 fact = m.group(0).strip()
                 if len(fact) < 3:
                     continue

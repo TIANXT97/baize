@@ -1,7 +1,6 @@
 """Decay Manager - layered decay with zero-decay for identity/preference."""
 import math
 import time
-from typing import Optional
 
 LANE_CONFIG = {
     "identity":    {"multiplier": 0.0},

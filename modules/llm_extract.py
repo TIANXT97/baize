@@ -17,7 +17,7 @@ EXTRACT_PROMPT = """从以下文本中提取所有事实性信息。每条信息
 [{"fact": "完整描述句", "category": "分类", "importance": 0.5}]
 
 分类规则（category 必须是以下 9 类之一，不确定时用 general）：
-- identity：姓名、住址、职业、生日、身份信息（例：用户叫张三）
+- identity：姓名、住址、职业、生日、身份信息（例：用户叫TIAN）
 - preference：喜好、偏好、习惯（例：用户喜欢咖啡）
 - emotion：情绪感受（例：用户最近工作压力很大）
 - lesson：踩坑、报错、教训、经验（例：非 root 跑 systemctl --user 报 Failed to connect to bus）
@@ -29,7 +29,7 @@ EXTRACT_PROMPT = """从以下文本中提取所有事实性信息。每条信息
 
 fact必须是完整中文描述句。例如：
 - 输入"我的客户包括欧莱雅" → {"fact": "用户的客户包括欧莱雅", "category": "general", "importance": 0.5}
-- 输入"我叫张三" → {"fact": "用户叫张三", "category": "identity", "importance": 0.8}
+- 输入"我叫TIAN" → {"fact": "用户叫TIAN", "category": "identity", "importance": 0.8}
 - 输入"我喜欢咖啡" → {"fact": "用户喜欢咖啡", "category": "preference", "importance": 0.6}
 - 输入"踩过坑：非 root 跑 systemctl --user 报 Failed to connect to bus" → {"fact": "非 root 跑 systemctl --user 会报 Failed to connect to bus", "category": "lesson", "importance": 0.6}
 - 输入"baize 服务由 systemd 用户服务托管，崩溃 5 秒自动重启" → {"fact": "baize 服务由 systemd 用户服务托管，崩溃 5 秒自动重启", "category": "procedural", "importance": 0.6}
@@ -51,12 +51,28 @@ class LLMExtractor:
     """Extract facts from text using LLM with LRU cache support."""
 
     def __init__(self, api_url: str, api_key: str, model: str = "Ling-3.0-flash",
-                 cache_ttl_sec: int = 3600, cache_max: int = 256):
+                 cache_ttl_sec: int = 3600, cache_max: int = 256,
+                 timeout_sec: int = 30, max_tokens: int = 2048,
+                 fallbacks: Optional[List[Dict]] = None):
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.cache_ttl_sec = cache_ttl_sec
         self.cache_max = cache_max
+        # 2026-09-15：超时 15s→30s（可配），避免偶发慢响应被误判为不可用
+        self.timeout_sec = timeout_sec
+        self.max_tokens = max_tokens
+        # 调用链：主端点 + 备用端点，逐级降级。元素 {api_url, api_key, model}
+        self.chain: List[Dict] = [
+            {"api_url": self.api_url, "api_key": api_key, "model": model}
+        ]
+        for fb in (fallbacks or []):
+            if fb.get("api_url") and fb.get("api_key") and fb.get("model"):
+                self.chain.append({
+                    "api_url": str(fb["api_url"]).rstrip("/"),
+                    "api_key": fb["api_key"],
+                    "model": fb["model"],
+                })
         # LRU cache: {text_hash: (expire_at, result)}
         self._cache: OrderedDict[str, Tuple[float, List[Dict]]] = OrderedDict()
         self._lock = threading.Lock()
@@ -90,33 +106,65 @@ class LLMExtractor:
             while len(self._cache) > self.cache_max:
                 self._cache.popitem(last=False)
 
-    def _call_llm(self, prompt: str) -> Optional[str]:
-        """Call LLM API with retry logic (max 1 retry). Returns raw content or None."""
+    def _call_endpoint(self, endpoint: Dict, prompt: str) -> Tuple[Optional[str], str]:
+        """打单个端点，最多重试 1 次。返回 (content, fail_reason)。
+
+        content 为 None 表示该端点彻底不可用（超时/网络/HTTP/响应体异常）。
+        """
+        last_err = ""
         for attempt in range(2):
             try:
                 payload = {
-                    "model": self.model,
+                    "model": endpoint["model"],
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 2048,
+                    "max_tokens": self.max_tokens,
                     "temperature": 0.1,
                 }
                 data = json.dumps(payload).encode()
                 req = urllib.request.Request(
-                    f"{self.api_url}/chat/completions",
+                    f"{endpoint['api_url']}/chat/completions",
                     data=data,
                     headers={
-                        "Authorization": f"Bearer {self.api_key}",
+                        "Authorization": f"Bearer {endpoint['api_key']}",
                         "Content-Type": "application/json",
                     },
                 )
-                resp = urllib.request.urlopen(req, timeout=15)
+                resp = urllib.request.urlopen(req, timeout=self.timeout_sec)
                 result = json.loads(resp.read())
-                return result["choices"][0]["message"]["content"]
+                content = result["choices"][0]["message"]["content"]
+                if content is None:
+                    last_err = "empty content field"
+                    continue
+                return content, ""
             except Exception as e:
-                log.warning(f"LLM extraction failed (attempt {attempt + 1}/2): {e}")
+                last_err = f"{type(e).__name__}: {e}"
+                log.warning(
+                    f"LLM extraction failed on {endpoint['model']} "
+                    f"(attempt {attempt + 1}/2, timeout={self.timeout_sec}s): {e}"
+                )
                 if attempt == 0:
                     log.info("Retrying LLM extraction...")
-        return None
+        return None, last_err
+
+    def _call_llm(self, prompt: str) -> Tuple[Optional[str], str, str]:
+        """按调用链逐级降级打端点。
+
+        返回 (content, used_model, fail_reason)：
+        - content 非 None：某个端点给出了可读响应（used_model = 该模型名）
+        - content 为 None：整条链全部失败（fail_reason 保留最后一次错误，供告警）
+        """
+        reasons = []
+        for endpoint in self.chain:
+            content, err = self._call_endpoint(endpoint, prompt)
+            if content is not None:
+                if endpoint is not self.chain[0]:
+                    log.warning(
+                        f"LLM extraction degraded to fallback endpoint "
+                        f"'{endpoint['model']}'"
+                    )
+                return content, endpoint["model"], ""
+            reasons.append(f"{endpoint['model']}: {err}")
+        return None, "", " | ".join(reasons)
 
     def extract(self, text: str, source: str = "hermes") -> List[Dict]:
         """Extract facts from text, with LRU cache."""
@@ -135,15 +183,18 @@ class LLMExtractor:
             return cached
 
         prompt = EXTRACT_PROMPT + text
-        content = self._call_llm(prompt)
+        content, used_model, fail_reason = self._call_llm(prompt)
         if content is None:
-            return []
+            # 整条链全部失败：不返回 []（那会被上层当成"无事实"而静默降级），
+            # 而是抛异常让调用方明确感知——只有"模型确实答了但没事实"才写空。
+            log.error(f"LLM extraction chain exhausted: {fail_reason}")
+            raise RuntimeError(f"LLM extraction unavailable: {fail_reason}")
 
-        log.info(f"LLM raw response: {content[:200]}")
+        log.info(f"LLM raw response [{used_model}]: {content[:200]}")
         facts = self._parse_facts(content)
         for f in facts:
             f["source"] = source
-        log.info(f"LLM extracted {len(facts)} facts")
+        log.info(f"LLM extracted {len(facts)} facts (model={used_model})")
 
         # Store in cache (deep copy to avoid mutation side-effects)
         import copy
