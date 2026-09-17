@@ -188,8 +188,10 @@ class HybridRecall:
             sims[start:start + len(chunk)] = (mat @ qf) / (mat_norms * q_norm + 1e-9)
         sims = (sims + 1.0) / 2.0  # [-1,1] → [0,1]
 
-        # A4: argpartition 取 top-k（O(n)），再对 k 个做分数降序，保持确定性
-        k = min(limit, len(sims))
+        # 2026-09-17 第一刀：初筛过采样（Over-fetching），从 limit 提升至 max(limit * 5, 25)
+        # 防止昨晚的新决策因微小向量分数劣势在初筛阶段被直接掐死在门槛外
+        candidate_k = max(limit * 5, 25)
+        k = min(candidate_k, len(sims))
         if k <= 0:
             return []
         if k < len(sims):
@@ -249,21 +251,23 @@ class HybridRecall:
         t0 = time.perf_counter()
         results = {}
 
-        # FTS5 keyword search (weight: FTS_WEIGHT) — score 已含 BM25 相关度 × decay
+        # FTS5 keyword search (weight: FTS_WEIGHT) — 2026-09-17 初筛过采样
         t_fts = time.perf_counter()
-        fts_results = self._fts_search(query, user_id, limit * 2)
+        fts_limit = max(limit * 5, 25)
+        fts_results = self._fts_search(query, user_id, fts_limit)
         trace["timings_ms"]["fts"] = round((time.perf_counter() - t_fts) * 1000, 2)
         trace["stages"]["fts_candidates"] = len(fts_results)
         for r in fts_results:
             rid = r["id"]
             results[rid] = {**r, "score": r.get("score", 0.5) * FTS_WEIGHT, "source": "fts"}
 
-        # Vector search (weight: VEC_WEIGHT)
+        # Vector search (weight: VEC_WEIGHT) — 2026-09-17 初筛过采样
         t_vec = time.perf_counter()
         vec_count = 0
         if HAS_VEC:
             try:
-                vec_results = self._vector_search(query, user_id, limit * 2)
+                vec_limit = max(limit * 5, 25)
+                vec_results = self._vector_search(query, user_id, vec_limit)
                 vec_count = len(vec_results)
                 for r in vec_results:
                     rid = r["id"]
@@ -336,6 +340,25 @@ class HybridRecall:
         finally:
             trace["timings_ms"]["graph"] = round((time.perf_counter() - t_graph) * 1000, 2)
             trace["stages"]["graph_expanded"] = len(results) - trace["stages"]["hybrid_merged"]
+
+        # 2026-09-17 第一刀：绝对时效加性增益（Additive Recency Prior）
+        # 让 24-48 小时内的最新真决议拥有确定性的反超加分，彻底消除 14 天前老黄历压制新决议的死穴
+        now_ts = time.time()
+        for r in results.values():
+            try:
+                c_ts = datetime.fromisoformat(r["created_at"]).timestamp()
+                age_h = (now_ts - c_ts) / 3600.0
+                recency_boost = 0.0
+                if age_h <= 24:
+                    recency_boost = 0.25
+                elif age_h <= 48:
+                    recency_boost = 0.15
+                elif age_h <= 168:
+                    recency_boost = 0.05
+                r["score"] = round(r["score"] + recency_boost, 3)
+                r["recency_boost"] = recency_boost
+            except Exception:
+                pass
 
         sorted_results = sorted(results.values(), key=lambda x: x["score"], reverse=True)
 

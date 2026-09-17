@@ -408,21 +408,27 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
             log.error(f"LLM extraction unavailable, refusing raw-text fallback: {e}")
 
     if not facts:
-        # 2026-09-15 修复：只有"模型确实答了但确认无事实"才允许兜底写原文。
-        # 模型链全挂时（llm_failed）绝不写原文——否则会把整段对话当一条记忆
-        # 悄悄灌进库（历史 882 条 58 万字垃圾的根源），且日志无痕。
+        # 2026-09-17 治本熔断：当提取模型确认 0 事实（facts == []）时，判定为当前内容无事实价值，
+        # 严禁将整段生肉原文落库！仅允许极短的纯文本事实在无角色扮演动作标记时兜底。
         if llm_failed:
             log.error(
                 f"Skip store: LLM chain unavailable for source={source} "
                 f"(would have written raw text as fallback). reason={llm_fail_reason}"
             )
             return []
-        if len(text.strip()) >= 5:
+        clean_text = text.strip()
+        # 严格生肉熔断：>150 字符、包含动作标记 *、包含换行台词，坚决不存生肉
+        import re
+        if 5 <= len(clean_text) <= 150 and not re.search(r"\*.*?\*", clean_text) and "\n" not in clean_text:
             log.warning(
-                f"LLM returned 0 facts (model answered, no facts found) — "
-                f"storing raw text as fallback fact, source={source}, len={len(text.strip())}"
+                f"LLM returned 0 facts, short plain text allowed fallback: len={len(clean_text)}"
             )
-            facts = [{"fact": text.strip(), "category": "general", "importance": 0.3, "source": "fallback"}]
+            facts = [{"fact": clean_text, "category": "general", "importance": 0.3, "source": "fallback"}]
+        else:
+            log.info(
+                f"LLM returned 0 facts — content is exploration/roleplay/length={len(clean_text)}, raw text rejected."
+            )
+            return []
 
     if not facts:
         return []
