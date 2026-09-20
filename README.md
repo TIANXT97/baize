@@ -136,8 +136,11 @@ memory:
 
 ## 📚 详细技术文档 (Documentation)
 
-- 📜 [白泽 v1.4.1 完整技术白皮书](docs/whitepaper.md)
-- 📋 [Claude Opus 4.6 深度终审与生产就绪复验报告](docs/AUDIT_OPUS_RE_REPORT.md)
+- 📜 [白泽 v1.5.0 完整技术白皮书（天禄现役版）](docs/whitepaper.md)
+- 📜 [全景演进与架构审计编年史（v1.0 ~ v1.5.0）](docs/CHANGELOG.md)
+- 🔍 [Step-5-Preview (600B MoE) 架构探伤报告](docs/AUDIT_REPORT_STEP5.md)
+- ⚖️ [Claude Opus 首席架构终审裁定书](docs/AUDIT_REPORT_OPUS_FINAL.md)
+- 📋 [Claude Opus 4.6 早期终审与生产就绪复验报告](docs/AUDIT_OPUS_RE_REPORT.md)
 
 ---
 
