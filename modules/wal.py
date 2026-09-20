@@ -50,6 +50,8 @@ class WALEngine:
                 self._maybe_rotate_locked()
                 with open(self.wal_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
         except Exception as e:
             log.error(f"WAL append failed: {e}")
             raise
@@ -67,6 +69,8 @@ class WALEngine:
                 self._maybe_rotate_locked()
                 with open(self.wal_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
         except Exception as e:
             log.error(f"WAL mark_complete failed: {e}")
             raise

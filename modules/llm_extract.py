@@ -34,6 +34,8 @@ fact必须是完整中文描述句。例如：
 - 输入"踩过坑：非 root 跑 systemctl --user 报 Failed to connect to bus" → {"fact": "非 root 跑 systemctl --user 会报 Failed to connect to bus", "category": "lesson", "importance": 0.6}
 - 输入"baize 服务由 systemd 用户服务托管，崩溃 5 秒自动重启" → {"fact": "baize 服务由 systemd 用户服务托管，崩溃 5 秒自动重启", "category": "procedural", "importance": 0.6}
 
+**实体完整性铁律**：提取事实时必须显式补齐主语、宿主与操作主体环境（例如：禁止只说“裁定保留两个模型”或“修改了配置”，必须补齐为“在 10router 中裁定保留两个模型”、“在 NAS 宿主上修改了配置”；禁止出现脱离上下文的无主断句）。
+
 重要：只要是事实性信息就提取，不要跳过任何内容。如果没有事实，返回[]。
 
 文本：

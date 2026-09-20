@@ -288,6 +288,49 @@ class HybridRecall:
         # graph）均已乘 decay_factor。此处再叠加 importance*0.2 会造成三重复计
         # （importance 被计入 3 次），高低 importance 的差异已由 decay_factor 体现。
 
+        # 2026-09-18 第二刀：活跃记忆时效保底池（方案二 · Recent Pool）
+        # 根治"最新决议文本不含查询关键词 → FTS/Vector 初筛（各 Top-100）即跌出
+        # 候选集 → 永远享受不到 Recency Boost 而沉底"的系统性缺陷：最近 48h 内
+        # 按 importance DESC, id DESC 的前 30 条活跃记忆无条件补入候选集，
+        # 保底基准分 = importance * 0.4；已在候选集中的记忆保持原分数不变。
+        # 纯 SQLite 毫秒级实现，评分量纲（Vector 0.5 + FTS 0.3 + Graph 0.2）不变。
+        recent_pool_added = 0
+        try:
+            pool_now = time.time()
+            # 注：库内 created_at 全量为空格分隔格式（'YYYY-MM-DD HH:MM:SS'），
+            # isoformat() 产出的 'T' 分隔符会使同日边界记录被字符串比较误排除，
+            # 故 SQL 侧用 REPLACE 对齐为空格格式后再比较。
+            cutoff = datetime.fromtimestamp(pool_now - 172800).isoformat()
+            conn = sqlite3.connect(self.db_path, timeout=30.0)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.row_factory = sqlite3.Row
+            try:
+                recent_rows = conn.execute(
+                    """SELECT id, content, category, lane, importance, created_at,
+                              access_count, confirm_count
+                       FROM memories
+                       WHERE user_id = ? AND created_at >= REPLACE(?, 'T', ' ')
+                         AND id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')
+                       ORDER BY importance DESC, id DESC LIMIT 30""",
+                    (user_id, cutoff),
+                ).fetchall()
+            finally:
+                conn.close()
+            for row in recent_rows:
+                rid = row["id"]
+                if rid in results:
+                    continue  # 已在候选集中：保持原分数不变
+                row_dict = dict(row)
+                results[rid] = {
+                    **row_dict,
+                    "score": row_dict["importance"] * 0.4,
+                    "source": "recent_pool",
+                }
+                recent_pool_added += 1
+        except Exception as e:
+            log.warning(f"Recent pool recall failed: {e}")
+        trace["stages"]["recent_pool_added"] = recent_pool_added
+
         # P1-2: 图谱多跳扩展 — 沿 knowledge_evolution 关系边召回间接关联记忆
         t_graph = time.perf_counter()
         try:

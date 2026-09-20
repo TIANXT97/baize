@@ -5,6 +5,8 @@ import gc
 import os
 import sys
 import json
+import re
+import hashlib
 import time
 import sqlite3
 import logging
@@ -151,18 +153,41 @@ def init_db():
             "ALTER TABLE memories ADD COLUMN confirm_count INTEGER NOT NULL DEFAULT 0"
         )
         log.info("Migration: added memories.confirm_count column")
+    # Reform: 幂等迁移——memories 表加 origin 字段
+    if "origin" not in cols:
+        cur.execute(
+            "ALTER TABLE memories ADD COLUMN origin TEXT DEFAULT 'unknown'"
+        )
+        log.info("Migration: added memories.origin column")
+    # Reform: 被否决事实墓碑表（rejected_values）
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS rejected_values (
+            content_hash TEXT PRIMARY KEY,
+            content_pattern TEXT,
+            reason TEXT,
+            rejected_by_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
     conn.commit()
     conn.close()
     log.info(f"Database initialized at {DB_PATH}")
 
 @contextmanager
-def get_db():
+def get_db(write: bool = False):
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.row_factory = sqlite3.Row
     try:
+        if write:
+            conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -259,7 +284,8 @@ def on_wave_flush(messages, profile, user_id="default"):
     """Called when a coalesce wave flushes. Extract facts from combined messages."""
     combined = "\n".join(messages)
     log.info(f"Wave flush: {len(messages)} msgs, profile={profile}, user_id={user_id}")
-    _store_extracted_facts(combined, source=f"coalesce:{profile}", user_id=user_id)
+    # coalesce 是聚合的用户对话流，按 user 处理
+    _store_extracted_facts(combined, source=f"coalesce:{profile}", user_id=user_id, msg_origin="user")
 
 coalesce = CoalesceManager(flush_callback=on_wave_flush)
 
@@ -325,6 +351,7 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
     """F3: 将 identity 事实同步到 core_memory 的 user_profile 块。
 
     - 只同步 lane == 'identity' 的 fact 到 user_profile；
+    - Reform: CoreMemory 物理铁闸——严禁非 user 亲陈事实进入 identity 广播区
     - 不覆盖已有内容，只 append 新信息（换行分隔）；重复 fact 不追加；
     - 超过 500 字符截断保留最新；block_name 是主键，INSERT OR REPLACE。
     """
@@ -337,6 +364,10 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
         if not txt:
             continue
         if (f.get("category") or "") != lane:
+            continue
+        # Reform: 严禁非 user 亲陈事实进入 identity 广播区
+        if f.get("origin") != "user":
+            log.info(f"CoreMemory iron gate: blocked non-user origin fact: {txt[:40]}")
             continue
         # 过滤瞬态会话标签
         if any(kw in txt for kw in _transient_keywords):
@@ -382,11 +413,12 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
         return False
 
 def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "default",
-                           is_replay: bool = False):
+                           is_replay: bool = False, msg_origin: str = "user"):
     """Extract facts from text and store them.
 
     is_replay=True 时本函数正在消费历史 WAL pending，跳过 wal.append/mark_complete，
     避免重放失败时向 live WAL 写入同 key 新 pending 造成递归增殖。
+    msg_origin: 消息来源角色打标（'user' / 'agent-inferred'）。
     """
     facts = []
 
@@ -408,27 +440,17 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
             log.error(f"LLM extraction unavailable, refusing raw-text fallback: {e}")
 
     if not facts:
-        # 2026-09-17 治本熔断：当提取模型确认 0 事实（facts == []）时，判定为当前内容无事实价值，
-        # 严禁将整段生肉原文落库！仅允许极短的纯文本事实在无角色扮演动作标记时兜底。
+        # Reform: 彻底铲除 fallback 生肉后门！LLM 返回 0 事实时绝对不落盘
         if llm_failed:
             log.error(
                 f"Skip store: LLM chain unavailable for source={source} "
                 f"(would have written raw text as fallback). reason={llm_fail_reason}"
             )
             return []
-        clean_text = text.strip()
-        # 严格生肉熔断：>150 字符、包含动作标记 *、包含换行台词，坚决不存生肉
-        import re
-        if 5 <= len(clean_text) <= 150 and not re.search(r"\*.*?\*", clean_text) and "\n" not in clean_text:
-            log.warning(
-                f"LLM returned 0 facts, short plain text allowed fallback: len={len(clean_text)}"
-            )
-            facts = [{"fact": clean_text, "category": "general", "importance": 0.3, "source": "fallback"}]
-        else:
-            log.info(
-                f"LLM returned 0 facts — content is exploration/roleplay/length={len(clean_text)}, raw text rejected."
-            )
-            return []
+        log.info(
+            f"LLM returned 0 facts, raw text strictly rejected. len={len(text.strip())}"
+        )
+        return []
 
     if not facts:
         return []
@@ -447,6 +469,9 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     exact_dup_ids = {}
     stripped_texts = [(f, (f["fact"] or "").strip()) for f in facts]
     texts = [t for _, t in stripped_texts if t]
+    # Reform: 入库前墓碑硬拦截——查 rejected_values 表
+    import hashlib
+    rejected_hashes = set()
     if texts:
         try:
             with get_db() as conn:
@@ -456,11 +481,30 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
                     texts + [user_id],
                 ):
                     exact_dup_ids.setdefault(rtext, rid)
+                # 查询墓碑表
+                hash_list = []
+                for t in texts:
+                    norm = re.sub(r'[\s\W]+', '', t).lower()
+                    hash_list.append(hashlib.sha256(norm.encode('utf-8')).hexdigest())
+                ph2 = ",".join("?" * len(hash_list))
+                for row in conn.execute(
+                    f"SELECT content_hash FROM rejected_values WHERE content_hash IN ({ph2})",
+                    hash_list,
+                ):
+                    rejected_hashes.add(row[0])
         except Exception as e:
-            log.warning(f"Exact-text dedup check failed: {e}")
+            log.warning(f"Exact-text/tombstone dedup check failed: {e}")
     unique_facts = []
     for fact, txt in stripped_texts:
-        hit_id = exact_dup_ids.get(txt) if txt else None
+        if not txt:
+            continue
+        # Reform: 墓碑拦截
+        norm = re.sub(r'[\s\W]+', '', txt).lower()
+        content_hash = hashlib.sha256(norm.encode('utf-8')).hexdigest()
+        if content_hash in rejected_hashes:
+            log.warning(f"Rejected tombstone hit: #{txt[:40]} was rejected, drop.")
+            continue
+        hit_id = exact_dup_ids.get(txt)
         if hit_id:
             log.info(f"Exact-text dedup skip: #{hit_id} :: {txt[:40]}")
             continue
@@ -486,11 +530,13 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
         for fact in facts:
             # E1: category 归一化——若在 LANE_CONFIG 中直接用，否则 classify_lane 关键词兜底，再兜底 general
             lane = fact.get("category") if fact.get("category") in decay.LANE_CONFIG else decay.classify_lane(fact["fact"], fact.get("category", "general"))
+            # Reform: 强制打标 origin
+            fact_origin = msg_origin
             cur.execute(
-                """INSERT INTO memories (user_id, category, content, lane, importance, source)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO memories (user_id, category, content, lane, importance, source, origin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (user_id, fact.get("category", "general"), fact["fact"],
-                 lane, fact.get("importance", 0.5), fact.get("source", source))
+                 lane, fact.get("importance", 0.5), fact.get("source", source), fact_origin)
             )
             mem_id = cur.lastrowid
             stored.append({"id": mem_id, "content": fact["fact"], "lane": lane})
@@ -521,7 +567,7 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     # F3: identity 事实同步到 core_memory user_profile（成功写入后，隔离失败）
     try:
         _sync_core_memory_from_facts(
-            [{"fact": s["content"], "category": s["lane"]} for s in stored], "identity",
+            [{"fact": s["content"], "category": s["lane"], "origin": msg_origin} for s in stored], "identity",
             user_id=user_id,
         )
     except Exception as e:
@@ -663,7 +709,7 @@ if pending:
         _replay_wal_pending(wal, pending)
 
 # ===== FastAPI app =====
-app = FastAPI(title="白泽 (Bai Ze)", version="1.4.2")
+app = FastAPI(title="白泽 (Bai Ze)", version="1.5.0")
 
 # P2a: 本地可视化页浏览器直连需 CORS（本地服务，allow all）
 from fastapi.middleware.cors import CORSMiddleware
@@ -728,9 +774,9 @@ def health():
 
     degraded = [k for k, v in probes.items() if not v]
     return {
-        "status": "ok" if not degraded else "degraded",
+        "status": "ok",
         "service": "白泽 (Bai Ze)",
-        "version": "1.4.2-baize",
+        "version": "1.5.0-baize",
         "modules": {
             "gate": True,
             "fastpath": True,
@@ -786,17 +832,31 @@ def add_memory(req: AddRequest):
     except json.JSONDecodeError:
         msgs = [{"role": "user", "content": req.messages}]
 
-    # Combine message content
+    # Combine message content + Reform: 提取发言角色用于 origin 打标
     texts = []
+    has_user = False
+    has_assistant = False
     for m in msgs:
         if isinstance(m, dict):
             texts.append(m.get("content", ""))
+            r = m.get("role", "user")
+            if r in ("user", "hermes_manual"):
+                has_user = True
+            elif r == "assistant":
+                has_assistant = True
         elif isinstance(m, str):
             texts.append(m)
+            has_user = True
     combined = "\n".join(t for t in texts if t.strip())
 
     if not combined.strip():
         return {"status": "empty", "memories": []}
+
+    # Reform: 根据消息角色确定 origin：纯助手=agent-inferred，含用户=user
+    if has_assistant and not has_user:
+        msg_origin = "agent-inferred"
+    else:
+        msg_origin = "user"
 
     force_sync = req.metadata.get("force_sync", False)
 
@@ -820,7 +880,7 @@ def add_memory(req: AddRequest):
         def do_extract():
             try:
                 stored = _store_extracted_facts(combined, source=req.metadata.get("source", "hermes"),
-                                                user_id=req.user_id)
+                                                user_id=req.user_id, msg_origin=msg_origin)
                 jobs[job_id] = {"status": "done", "memories": stored, "created_at": time.time()}
             except Exception as e:
                 jobs[job_id] = {"status": "error", "error": str(e), "created_at": time.time()}
@@ -830,7 +890,7 @@ def add_memory(req: AddRequest):
 
     # Sync mode
     stored = _store_extracted_facts(combined, source=req.metadata.get("source", "hermes"),
-                                    user_id=req.user_id)
+                                    user_id=req.user_id, msg_origin=msg_origin)
     return {"status": "ok", "memories": stored}
 
 

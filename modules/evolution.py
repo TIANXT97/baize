@@ -1,5 +1,6 @@
 """Knowledge Evolution Tracker - detect relationships between new and existing memories."""
 import re
+import hashlib
 import sqlite3
 import logging
 from typing import List, Dict, Optional, Tuple
@@ -131,7 +132,13 @@ class EvolutionTracker:
         return len(intersection) / len(union)
 
     def _classify_relation(self, new_text: str, old_text: str) -> Tuple[Optional[str], float, str]:
-        """Classify relationship between new and old memory."""
+        """Classify relationship between new and old memory.
+
+        Reform: 彻底废除 Jaccard 线性乘积作为取代置信度的错误公式。
+        长句纠错时词汇并集大导致 Jaccard 极低（实测 0.23），
+        导致置信度被锁死在 0.27（<0.6），永远无法触发 replaces。
+        新规则：极性翻转 + 共同词>=3 → 直接判定 replaces, confidence=0.85。
+        """
         jaccard = self._jaccard(new_text, old_text)
 
         # Check polarity flip
@@ -143,9 +150,8 @@ class EvolutionTracker:
         common_topics = new_words & old_words
 
         if has_flip and len(common_topics) >= 3:
-            # replaces: polarity flip with solid overlap, confidence ~jaccard scaled up
-            confidence = min(0.95, jaccard * 1.15)
-            return "replaces", round(confidence, 2), f"极性翻转+共同话题{len(common_topics)}个"
+            # Reform: 极性翻转+共同话题充分 → 直接判定 replaces，置信度 0.85
+            return "replaces", 0.85, f"极性翻转+共同话题{len(common_topics)}个"
         elif jaccard > 0.5 and not has_flip:
             # enriches: high direct similarity
             confidence = min(0.95, jaccard)
@@ -165,12 +171,13 @@ class EvolutionTracker:
         """Mark a memory as superseded.
 
         D3: 先确认目标记忆存在且属于 user_id，避免跨用户影响。
+        Reform: 同步将旧记忆内容写入 rejected_values 墓碑表。
         """
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA busy_timeout = 30000")
         try:
             cur = conn.cursor()
-            cur.execute("SELECT user_id FROM memories WHERE id = ?", (memory_id,))
+            cur.execute("SELECT user_id, content FROM memories WHERE id = ?", (memory_id,))
             row = cur.fetchone()
             if not row:
                 log.warning(f"Evolution: skip supersede memory {memory_id}: not found")
@@ -181,10 +188,18 @@ class EvolutionTracker:
                     f"belongs to user '{row[0]}', not '{user_id}'"
                 )
                 return False
+            old_content = row[1]
             cur.execute("""
                 INSERT OR REPLACE INTO memory_states (memory_id, state, reason, source, updated_at)
                 VALUES (?, 'superseded', ?, ?, datetime('now','localtime'))
             """, (memory_id, reason, str(source_id)))
+            # Reform: 写墓碑表，阻断已否决事实换 ID 复活
+            norm_text = re.sub(r'[\s\W]+', '', old_content).lower()
+            content_hash = hashlib.sha256(norm_text.encode('utf-8')).hexdigest()
+            cur.execute(
+                "INSERT OR IGNORE INTO rejected_values (content_hash, content_pattern, reason, rejected_by_id) VALUES (?, ?, ?, ?)",
+                (content_hash, old_content[:100], reason, source_id)
+            )
             conn.commit()
             log.info(f"Memory {memory_id} marked superseded by {source_id}: {reason}")
             return True
