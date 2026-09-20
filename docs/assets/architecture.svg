@@ -1,0 +1,248 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 860" width="1000" height="860" style="background:#0d1117; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f242c" />
+      <stop offset="100%" stop-color="#161b22" />
+    </linearGradient>
+    <linearGradient id="writeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1b2838" />
+      <stop offset="100%" stop-color="#0e1724" />
+    </linearGradient>
+    <linearGradient id="recallGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a2e26" />
+      <stop offset="100%" stop-color="#0d1f1a" />
+    </linearGradient>
+    <linearGradient id="baseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#21262d" />
+      <stop offset="100%" stop-color="#161b22" />
+    </linearGradient>
+    <linearGradient id="backupGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2d1d24" />
+      <stop offset="100%" stop-color="#1c1419" />
+    </linearGradient>
+
+    <!-- Filters & Shadows -->
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+    <filter id="glowRed" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <!-- Markers -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#58a6ff" />
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#3fb950" />
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#d4483b" />
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#bc8cff" />
+    </marker>
+  </defs>
+
+  <!-- Title Badge -->
+  <g transform="translate(40, 24)">
+    <rect x="0" y="0" width="920" height="42" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1" />
+    <circle cx="24" cy="21" r="6" fill="#d4483b" />
+    <circle cx="42" cy="21" r="6" fill="#d29922" />
+    <circle cx="60" cy="21" r="6" fill="#3fb950" />
+    <text x="460" y="27" fill="#f0f6fc" font-size="15" font-weight="600" text-anchor="middle" letter-spacing="1">
+      白泽 v1.5.0「天禄」全景架构拓扑 (TianLu Engine Architecture)
+    </text>
+  </g>
+
+  <!-- Layer 1: Agent Interaction Layer -->
+  <g transform="translate(40, 84)" filter="url(#cardShadow)">
+    <rect x="0" y="0" width="920" height="64" rx="10" fill="url(#headerGrad)" stroke="#388bfd" stroke-width="1.5" />
+    <rect x="18" y="16" width="32" height="32" rx="6" fill="#388bfd" fill-opacity="0.15" />
+    <path d="M 34 22 L 34 32 M 28 27 L 40 27 M 26 38 L 42 38" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" />
+    <text x="64" y="35" fill="#f0f6fc" font-size="16" font-weight="600">AI Agent 认知交互层</text>
+    <text x="64" y="52" fill="#8b949e" font-size="12">Hermes Agent / Multi-Agent Workspace (会话生命周期与主动追忆)</text>
+    
+    <rect x="680" y="16" width="220" height="32" rx="6" fill="#21262d" stroke="#30363d" />
+    <text x="790" y="37" fill="#58a6ff" font-size="12" font-family="monospace" text-anchor="middle">REST API / Plugin 钩子</text>
+  </g>
+
+  <!-- Bridge Line: Agent to Kernel -->
+  <path d="M 500 148 L 500 180" stroke="#58a6ff" stroke-width="2" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+
+  <!-- Layer 2: Main Kernel Box -->
+  <g transform="translate(40, 180)" filter="url(#cardShadow)">
+    <!-- Kernel Outer Frame -->
+    <rect x="0" y="0" width="920" height="490" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5" />
+    
+    <!-- Kernel Header -->
+    <rect x="0" y="0" width="920" height="40" rx="12" fill="#21262d" />
+    <path d="M 0 30 L 0 40 L 920 40 L 920 30 Z" fill="#21262d" />
+    <text x="24" y="26" fill="#d4483b" font-size="15" font-weight="700" letter-spacing="0.5">BAIZE KERNEL · 内核处理总线</text>
+    <rect x="760" y="10" width="140" height="20" rx="10" fill="#238636" fill-opacity="0.2" stroke="#238636" stroke-width="1" />
+    <text x="830" y="24" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Debian 13 · 8767</text>
+
+    <!-- LEFT COLUMN: Write & Evolution Pipeline -->
+    <g transform="translate(20, 56)">
+      <rect x="0" y="0" width="430" height="414" rx="8" fill="url(#writeGrad)" stroke="#1f6feb" stroke-width="1.2" />
+      <rect x="0" y="0" width="430" height="34" rx="8" fill="#1f6feb" fill-opacity="0.2" />
+      <text x="16" y="23" fill="#58a6ff" font-size="14" font-weight="600">📥 写入、认知防御与演化链路</text>
+      
+      <!-- Flow Items Left -->
+      <!-- 1. Origin Gate -->
+      <g transform="translate(16, 46)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#f85149" stroke-width="1.5" />
+        <text x="14" y="24" fill="#ff7b72" font-size="12" font-weight="600">🛡️ Origin 角色硬标记</text>
+        <text x="160" y="24" fill="#8b949e" font-size="11">非 user 事实物理禁入 CoreMemory</text>
+      </g>
+      <!-- Down arrow -->
+      <line x1="215" y1="84" x2="215" y2="94" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" />
+
+      <!-- 2. Coalesce -->
+      <g transform="translate(16, 94)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="14" y="24" fill="#e6edf3" font-size="12" font-weight="600">🌊 Coalesce 潮浪缓冲</text>
+        <text x="160" y="24" fill="#8b949e" font-size="11">动作触发 + 窗口聚合 (省 80% Token)</text>
+      </g>
+      <line x1="215" y1="132" x2="215" y2="142" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" />
+
+      <!-- 3. LLM Extract -->
+      <g transform="translate(16, 142)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="14" y="24" fill="#e6edf3" font-size="12" font-weight="600">🧠 LLM 双链高可用提取</text>
+        <text x="160" y="24" fill="#8b949e" font-size="11">实体主语补全 (Atria 主 / Ling 备)</text>
+      </g>
+      <line x1="215" y1="180" x2="215" y2="190" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" />
+
+      <!-- 4. Raw text fuse & Tombstone -->
+      <g transform="translate(16, 190)">
+        <rect x="0" y="0" width="398" height="42" rx="6" fill="#161b22" stroke="#d29922" stroke-width="1.2" />
+        <text x="14" y="19" fill="#d29922" font-size="12" font-weight="600">🚫 生肉硬熔断 + 墓碑抗体拦截</text>
+        <text x="14" y="35" fill="#8b949e" font-size="10.5">零事实坚决不落盘 | 命中 rejected_values 换 ID 必杀</text>
+      </g>
+      <line x1="215" y1="232" x2="215" y2="242" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" />
+
+      <!-- 5. WAL & fsync -->
+      <g transform="translate(16, 242)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5" />
+        <text x="14" y="24" fill="#58a6ff" font-size="12" font-weight="600">💾 WAL 预写 + os.fsync()</text>
+        <text x="170" y="24" fill="#79c0ff" font-size="11">穿透 PageCache 物理落盘防断电丢</text>
+      </g>
+      <line x1="215" y1="280" x2="215" y2="290" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" />
+
+      <!-- 6. BEGIN IMMEDIATE Lock -->
+      <g transform="translate(16, 290)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1.5" />
+        <text x="14" y="24" fill="#3fb950" font-size="12" font-weight="600">🔒 BEGIN IMMEDIATE 事务锁</text>
+        <text x="180" y="24" fill="#8b949e" font-size="11">消灭读升写 SQLITE_BUSY 死锁</text>
+      </g>
+      <line x1="215" y1="328" x2="215" y2="338" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" />
+
+      <!-- 7. Evolution & Polarity Flip -->
+      <g transform="translate(16, 338)">
+        <rect x="0" y="0" width="398" height="48" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="1.2" />
+        <text x="14" y="20" fill="#d2a8ff" font-size="12" font-weight="600">🧬 知识拓扑演化 + 极性反转取代</text>
+        <text x="14" y="38" fill="#8b949e" font-size="10.5">否定翻转直接 replaces (conf=0.85) | Voyage 1024 维双写</text>
+      </g>
+    </g>
+
+    <!-- RIGHT COLUMN: Recall & Retrieval Pipeline -->
+    <g transform="translate(470, 56)">
+      <rect x="0" y="0" width="430" height="414" rx="8" fill="url(#recallGrad)" stroke="#238636" stroke-width="1.2" />
+      <rect x="0" y="0" width="430" height="34" rx="8" fill="#238636" fill-opacity="0.2" />
+      <text x="16" y="23" fill="#3fb950" font-size="14" font-weight="600">🔍 追忆、多路召回与漏斗重排</text>
+
+      <!-- Flow Items Right -->
+      <!-- 1. Memory Gate -->
+      <g transform="translate(16, 46)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="14" y="24" fill="#e6edf3" font-size="12" font-weight="600">🚪 MemoryGate 意图门控</text>
+        <text x="175" y="24" fill="#8b949e" font-size="11">纠正/问句意图嗅探 (闲聊快速过滤)</text>
+      </g>
+      <line x1="215" y1="84" x2="215" y2="94" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowGreen)" />
+
+      <!-- 2. Recent Pool -->
+      <g transform="translate(16, 94)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1.5" />
+        <text x="14" y="24" fill="#3fb950" font-size="12" font-weight="600">⚡ 48h 活跃保底池 (Recent Pool)</text>
+        <text x="210" y="24" fill="#7ee787" font-size="11">前30条保底 (24h+0.25加成)</text>
+      </g>
+      <line x1="215" y1="132" x2="215" y2="142" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowGreen)" />
+
+      <!-- 3. Hybrid Recall Branch -->
+      <g transform="translate(16, 142)">
+        <rect x="0" y="0" width="192" height="42" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="10" y="19" fill="#e6edf3" font-size="11.5" font-weight="600">FTS5 BM25 词项</text>
+        <text x="10" y="34" fill="#8b949e" font-size="10">前置过滤 superseded</text>
+
+        <rect x="206" y="0" width="192" height="42" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="10" y="19" fill="#e6edf3" font-size="11.5" font-weight="600" transform="translate(206,0)">Voyage INT8 向量</text>
+        <text x="10" y="34" fill="#8b949e" font-size="10" transform="translate(206,0)">1024维点积余弦计算</text>
+      </g>
+      <line x1="215" y1="184" x2="215" y2="194" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowGreen)" />
+
+      <!-- 4. Score Fusion -->
+      <g transform="translate(16, 194)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="14" y="24" fill="#e6edf3" font-size="12" font-weight="600">⚖️ 三来源打分归一融合</text>
+        <text x="165" y="24" fill="#8b949e" font-size="11">Vector 0.5 + FTS 0.3 + Graph 0.2</text>
+      </g>
+      <line x1="215" y1="232" x2="215" y2="242" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowGreen)" />
+
+      <!-- 5. Knowledge Graph Multi-hop -->
+      <g transform="translate(16, 242)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="14" y="24" fill="#e6edf3" font-size="12" font-weight="600">🕸️ Knowledge 图谱多跳扩展</text>
+        <text x="180" y="24" fill="#8b949e" font-size="11">沿演化边激活关联上下文</text>
+      </g>
+      <line x1="215" y1="280" x2="215" y2="290" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowGreen)" />
+
+      <!-- 6. Ebbinghaus 9-Lane Decay -->
+      <g transform="translate(16, 290)">
+        <rect x="0" y="0" width="398" height="38" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" />
+        <text x="14" y="24" fill="#e6edf3" font-size="12" font-weight="600">⏳ 艾宾浩斯 9 轨道分轨衰减</text>
+        <text x="185" y="24" fill="#8b949e" font-size="11">身份/偏好永驻 · 闲聊平滑淡出</text>
+      </g>
+      <line x1="215" y1="328" x2="215" y2="338" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowGreen)" />
+
+      <!-- 7. Ignition & Cross-Encoder -->
+      <g transform="translate(16, 338)">
+        <rect x="0" y="0" width="398" height="48" rx="6" fill="#161b22" stroke="#388bfd" stroke-width="1.2" />
+        <text x="14" y="20" fill="#58a6ff" font-size="12" font-weight="600">⚡ Ignition 点火直达 (15ms) / 重排</text>
+        <text x="14" y="38" fill="#8b949e" font-size="10.5">高置信直达免调网 | 边界长尾走 Voyage Rerank-2.5-lite</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Layer 3: Persistence & Storage Base -->
+  <g transform="translate(40, 686)" filter="url(#cardShadow)">
+    <rect x="0" y="0" width="920" height="66" rx="10" fill="url(#baseGrad)" stroke="#30363d" stroke-width="1.5" />
+    <text x="24" y="28" fill="#f0f6fc" font-size="15" font-weight="600">🗄️ 单租户数据与持久化底座 (Data &amp; Persistence Tier)</text>
+    <text x="24" y="48" fill="#8b949e" font-size="12">Debian 13 Linux 纯血运行 · 内存开销 &lt; 120MB · 全程零外部重量级中间件依赖</text>
+
+    <!-- Component tags -->
+    <g transform="translate(470, 18)">
+      <rect x="0" y="0" width="136" height="30" rx="6" fill="#161b22" stroke="#58a6ff" />
+      <text x="68" y="20" fill="#79c0ff" font-size="11.5" font-family="monospace" text-anchor="middle">facts.db (i8-vec)</text>
+    </g>
+    <g transform="translate(616, 18)">
+      <rect x="0" y="0" width="136" height="30" rx="6" fill="#161b22" stroke="#3fb950" />
+      <text x="68" y="20" fill="#7ee787" font-size="11.5" font-family="monospace" text-anchor="middle">wal.jsonl (fsync)</text>
+    </g>
+    <g transform="translate(762, 18)">
+      <rect x="0" y="0" width="140" height="30" rx="6" fill="#161b22" stroke="#d4483b" />
+      <text x="70" y="20" fill="#ff7b72" font-size="11.5" font-family="monospace" text-anchor="middle">rejected_values</text>
+    </g>
+  </g>
+
+  <!-- Layer 4: Backup & Disaster Recovery -->
+  <g transform="translate(40, 768)">
+    <rect x="0" y="0" width="920" height="64" rx="8" fill="url(#backupGrad)" stroke="#8b1e3f" stroke-width="1.2" stroke-dasharray="6,4" />
+    <text x="24" y="27" fill="#f0883e" font-size="13.5" font-weight="600">🔄 每日 03:00 两段式解耦容灾热备链路</text>
+    <text x="24" y="47" fill="#8b949e" font-size="11.5">
+      ① VM 本地热备 (sqlite3 .backup 一致性快照) ──(局域网极速 rsync)──> 宿主 NAS 固态 (/vol1/...) ──(异步独立轮转)──> 百度网盘挂载卷 (两日滚动)
+    </text>
+  </g>
+</svg>
