@@ -22,5 +22,16 @@
         "model": "backup-model"
       }
     ]
+  },
+  "jev_gate": {
+    "enabled": true,
+    "api_key": "YOUR_TYPESAFE_JEV_API_KEY",
+    "api_url": "https://api.typesafe.ai/v1/systemone",
+    "model": "jev-latest",
+    "threshold": 0.25,
+    "search_threshold": 0.35,
+    "timeout_sec": 1.5,
+    "proxy": "http://127.0.0.1:7890",
+    "fallback_laya_url": "https://convaiinnovations-laya-demo.hf.space/gradio_api/call/run_playground"
   }
 }

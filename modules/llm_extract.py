@@ -122,6 +122,10 @@ class LLMExtractor:
                     "max_tokens": self.max_tokens,
                     "temperature": 0.1,
                 }
+                # 针对 deepseek 等推理模型，在记忆事实提取岗位显式关闭推理思考，提速且防止吞爆预算
+                if "deepseek" in endpoint["model"].lower():
+                    payload["reasoning_effort"] = "none"
+
                 data = json.dumps(payload).encode()
                 req = urllib.request.Request(
                     f"{endpoint['api_url']}/chat/completions",

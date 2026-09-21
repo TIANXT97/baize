@@ -8,8 +8,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Framework-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
-[![Release: v1.4.1](https://img.shields.io/badge/Release-v1.5.0--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
-[![Platform: Linux/Debian](https://img.shields.io/badge/Platform-Debian%2013%20Native-blue.svg)](#)
+[![Release: v1.5.1](https://img.shields.io/badge/Release-v1.5.1--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
+[![Platform: Linux/Debian](https://img.shields.io/badge/Platform-Debian%20Native-blue.svg)](#)
 
 </div>
 
@@ -19,7 +19,7 @@
 
 **白泽（Bai Ze）** 是一套专为长生命周期 AI Agent（如 Hermes Agent 等）设计的**全功能私有化持久思想引擎（Thought Engine）**。
 
-它坚决拒绝传统记忆方案中“无脑向量堆积、断电即丢、检索无序、长上下文费用失控”的痼疾，深度融合了**艾宾浩斯分轨遗忘衰减、知识拓扑演化建边、意图门控、潮浪波次防抖聚合、双模型混合检索（FTS5 + Voyage int8 向量 + 图谱多跳）、WAL 预写日志死信熔断与两段式灾备**。
+它坚决拒绝传统记忆方案中“无脑向量堆积、断电即丢、检索无序、长上下文费用失控”的痼疾，深度融合了**艾宾浩斯分轨遗忘衰减、知识拓扑演化建边、Jev/Laya 双端决策智能门控、潮浪波次防抖聚合、多模型混合检索（FTS5 + Voyage int8 向量 + 图谱多跳）、WAL 预写日志物理落盘与两段式灾备**。
 
 > **核心哲学**：  
 > *“记忆不是堆积，而是筛选；遗忘不是缺陷，而是智慧；思想不是存储，而是编织。”*
@@ -28,6 +28,9 @@
 
 ## ✨ 核心特性 (Key Features)
 
+- 🚪 **双端 System One 智能门控 (Jev Ingest & Search Dual-Gate · v1.5.1 新增)**：
+  - **写入端闲聊快筛 (Ingest Gate)**：引入 TypeSafe Jev 轻量判别模型，毫秒级拦截无价值闲聊与瞬态过渡语（`noul < 0.25`），跳过昂贵的大模型提取链，节省 70% Token 消耗并杜绝知识库水化；
+  - **召回端智能门神 (Search Gate)**：告别死板正则，主用 Jev 语义意图识别 + Laya HF 在线 Space 兜底，配合显式口令 0ms 白名单直通与 Fail-open 容灾，实现“该想时心领神会，不该想时绝不添乱”。
 - 🛡️ **四道认知防御铁壁 (Cognitive Defense & Tombstone)**：
   - **Origin 身份硬隔离**：解析输入角色打标，非用户亲陈事实在代码层物理剥夺进入 `user_profile` 权限，彻底杜绝大模型推测被洗白为永久画像；
   - **极性反转直接取代**：长句否定纠错直接判定 `replaces`（置信度 0.85），彻底破除 Jaccard 线性稀释与数学脑死亡；
@@ -49,7 +52,7 @@
 ## 🏗️ 架构拓扑 (Architecture)
 
 <div align="center">
-  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.0「天禄」全景架构拓扑" width="100%" />
+  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.1「天禄·天眼」全景架构拓扑" width="100%" />
 </div>
 
 <details>
@@ -64,31 +67,32 @@
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   白泽 v1.5.0「天禄」内核架构 (TianLu)                 │
+│               白泽 v1.5.1「天禄·天眼」内核架构 (TianLu Engine)          │
 │                                                                        │
 │  ┌──────────────────────┐              ┌────────────────────────────┐  │
 │  │     写入与演化链路   │              │        追忆与检索链路      │  │
 │  │                      │              │                            │  │
-│  │  Origin 角色硬标记   │              │  MemoryGate 意图门控       │  │
-│  │  (用户/助手身份隔离) │              │             │              │  │
-│  │         │            │              │  48h 活跃记忆保底初筛池    │  │
-│  │  Coalesce 潮浪缓冲   │              │  (Recent Pool + 显式时效)  │  │
+│  │  Jev Ingest 判别门控 │              │  Jev 智能门神 (Laya/白名单)│  │
+│  │  (前置过滤纯闲聊废话)│              │  (口令0ms直通 / Fail-open) │  │
 │  │         │            │              │             │              │  │
-│  │  LLM 双链高可用提取  │              │  FTS5 词项召回 (BM25)      │  │
-│  │  (实体主语强约束补全)│              │  (前置过滤 superseded)     │  │
+│  │  Origin 角色硬标记   │              │  48h 活跃记忆保底初筛池    │  │
+│  │  (用户/助手身份隔离) │              │  (Recent Pool + 显式时效)  │  │
 │  │         │            │              │             │              │  │
-│  │  生肉长文本硬熔断    │              │  Voyage 向量余弦 (int8)    │  │
+│  │  Coalesce 潮浪缓冲   │              │  FTS5 词项召回 (BM25)      │  │
+│  │         │            │              │  (前置过滤 superseded)     │  │
+│  │  LLM 多级降级链提取  │              │             │              │  │
+│  │  (DeepSeek/GLM/Atria)│              │  Voyage 向量余弦 (int8)    │  │
+│  │         │            │              │             │              │  │
+│  │  生肉长文本硬熔断    │              │  三来源打分量纲归一融合    │  │
 │  │  (零事实坚决不落盘)  │              │             │              │  │
-│  │         │            │              │  三来源打分量纲归一融合    │  │
-│  │  墓碑抗体比对过滤    │              │             │              │  │
-│  │  (rejected_values)   │              │  Knowledge 图谱多跳扩展    │  │
+│  │  墓碑抗体比对过滤    │              │  Knowledge 图谱多跳扩展    │  │
+│  │  (rejected_values)   │              │             │              │  │
+│  │         │            │              │  Ebbinghaus 9 轨道遗忘衰减 │  │
+│  │  WAL 预写 + os.fsync │              │             │              │  │
+│  │  (物理强制落盘防丢)  │              │  Ignition 点火高置信直达   │  │
 │  │         │            │              │             │              │  │
-│  │  WAL 预写 + os.fsync │              │  Ebbinghaus 9 轨道遗忘衰减 │  │
-│  │  (物理强制落盘防丢)  │              │             │              │  │
-│  │         │            │              │  Ignition 点火高置信直达   │  │
-│  │  BEGIN IMMEDIATE 锁  │              │             │              │  │
-│  │  (消灭读升写死锁)    │              │  Cross-Encoder 潮汐重排    │  │
-│  │         │            │              │             │              │  │
+│  │  BEGIN IMMEDIATE 锁  │              │  Cross-Encoder 潮汐重排    │  │
+│  │  (消灭读升写死锁)    │              │             │              │  │
 │  │  极性反转演化取代    │              │  search_trace 追忆透视全开 │  │
 │  └──────────────────────┘              └────────────────────────────┘  │
 │                                                                        │
@@ -124,11 +128,13 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. 配置环境变量
+### 2. 配置环境变量与门控
 ```bash
 cp .env.example .env
-# 编辑填入你的 API Key (提取器支持主/备双链自动降级，任意 OpenAI 兼容端点均可；
-# 例：主用免费羊毛模型 + 备用 Ling-3.0-flash(百灵) / Voyage AI 200M 免费额度做向量)
+# 编辑填入你的 API Key 与 config.json 配置：
+# - 提取器支持主/备双链自动降级（推荐主用 DeepSeek-V4.1-Flash [关闭推理]，备用 GLM-5.3-Flash / Ling-3.0-flash）；
+# - INT8 向量推荐 Voyage AI 200M 终身免费额度；
+# - 可选启用 Jev 门控（填入 typesafe API key 走专线代理，享受毫秒级闲聊拦截与智能意图识别）。
 ```
 
 ### 3. 启动服务
@@ -160,8 +166,8 @@ memory:
 
 ## 📚 详细技术文档 (Documentation)
 
-- 📜 [白泽 v1.5.0 完整技术白皮书（天禄现役版）](docs/whitepaper.md) — 核心系统架构、认知防线与存储规范
-- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.0 完整演进历史与历次架构审计结论
+- 📜 [白泽 v1.5.1 完整技术白皮书（天禄·天眼现役版）](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
+- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.1 完整演进历史与历次架构审计结论
 
 ---
 

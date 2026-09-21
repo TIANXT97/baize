@@ -51,10 +51,14 @@ QUESTION_PATTERNS = re.compile(
 
 
 class MemoryGate:
-    """Lightweight relevance gate using keyword matching + time window."""
+    """Lightweight relevance gate using keyword matching + time window.
 
-    def __init__(self, inherit_window_sec: float = 15.0):
+    v1.5.2: 可接受可选的 JevGate 实例，优先走智能判定，异常时自动降级到正则兜底。
+    """
+
+    def __init__(self, inherit_window_sec: float = 15.0, jev_gate=None):
         self.inherit_window = inherit_window_sec
+        self.jev_gate = jev_gate
         self._last_memory_time: float = 0
         self._last_needs_memory: bool = False
         self._explicit_search_re = re.compile("|".join(EXPLICIT_SEARCH_PATTERNS), re.IGNORECASE)
@@ -83,6 +87,24 @@ class MemoryGate:
         if self._pass_phrase_re.search(msg):
             self._update_state(True)
             return True
+        # 绝对无需记忆的短词/语气词（极短文本 < 6 字符且为纯确认回复）
+        if self._no_memory_re.match(msg):
+            self._update_state(False)
+            return False
+        # v1.5.2: Jev 智能门控（主用）+ Laya 兜底 + 正则 fallback
+        if self.jev_gate and self.jev_gate.enabled:
+            try:
+                needs, reason = self.jev_gate.needs_memory_search(msg)
+                if "regex_fallback" in reason:
+                    # Jev + Laya 均失败，落入原有正则兜底路径
+                    pass
+                else:
+                    self._update_state(needs)
+                    return needs
+            except Exception as e:
+                import logging
+                logging.getLogger("baize").warning(f"MemoryGate jev_gate call error: {e}")
+                # 异常降级，走下方正则兜底
         if len(msg) < 15 and self._last_needs_memory:
             elapsed = time.time() - self._last_memory_time
             if elapsed < self.inherit_window:

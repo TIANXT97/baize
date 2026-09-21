@@ -32,6 +32,7 @@ from modules import (
     Reranker,
 )
 from modules.coalesce import PROFILES
+from modules.jev_gate import JevGate
 
 # sqlite-vec 扩展：memory_vec 是 vec0 虚拟表，任何 DELETE/查询都需先 load 扩展
 # （get_db() 的普通连接不加载扩展，A2 修复前 /api/cleanup 的 vec DELETE 因此静默失败）
@@ -248,7 +249,7 @@ wal = WALEngine(
     max_bytes=2 * 1024 * 1024,
 )
 
-gate = MemoryGate()
+gate = MemoryGate()  # placeholder; jev_gate injected below after JevGate init
 fastpath = FastPath()
 decay = DecayManager()
 recall = HybridRecall(
@@ -288,6 +289,13 @@ def on_wave_flush(messages, profile, user_id="default"):
     _store_extracted_facts(combined, source=f"coalesce:{profile}", user_id=user_id, msg_origin="user")
 
 coalesce = CoalesceManager(flush_callback=on_wave_flush)
+
+# ===== Jev Gate (旁路记忆门控) =====
+_jev_cfg = config.get("jev_gate", {})
+jev_gate = JevGate(_jev_cfg) if _jev_cfg.get("enabled") else None
+if jev_gate:
+    log.info(f"JevGate enabled: model={jev_gate.model}, threshold={jev_gate.threshold}, search_threshold={jev_gate.search_threshold}")
+    gate.jev_gate = jev_gate  # inject jev_gate into MemoryGate for search-side gating
 
 
 # Reranker — Voyage rerank-2.5-lite 主用 + bge-reranker-v2-m3 兜底（自动读 .voyage_key / BAIZE_VOYAGE_KEY 与 .embed_key）
@@ -420,6 +428,13 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     避免重放失败时向 live WAL 写入同 key 新 pending 造成递归增殖。
     msg_origin: 消息来源角色打标（'user' / 'agent-inferred'）。
     """
+    # 前置旁路门控拦截（仅在非 WAL 重放时生效）
+    if not is_replay and jev_gate and jev_gate.enabled and len(text) > 15:
+        should_drop, reason = jev_gate.should_filter(text)
+        if should_drop:
+            log.info(f"JevGate filtered ephemeral text: {reason} | snippet={text[:40]!r}")
+            return []
+
     facts = []
 
     # Try fastpath first
@@ -709,7 +724,7 @@ if pending:
         _replay_wal_pending(wal, pending)
 
 # ===== FastAPI app =====
-app = FastAPI(title="白泽 (Bai Ze)", version="1.5.0")
+app = FastAPI(title="白泽 (Bai Ze)", version="1.5.1")
 
 # P2a: 本地可视化页浏览器直连需 CORS（本地服务，allow all）
 from fastapi.middleware.cors import CORSMiddleware
@@ -776,7 +791,7 @@ def health():
     return {
         "status": "ok",
         "service": "白泽 (Bai Ze)",
-        "version": "1.5.0-baize",
+        "version": "1.5.1-baize",
         "modules": {
             "gate": True,
             "fastpath": True,
@@ -813,7 +828,7 @@ def memory_health():
             evo = {}
     return {
         "status": "ok",
-        "version": "1.4.2-baize",
+        "version": "1.5.1-baize",
         "report": {
             "lane_distribution": lane_dist,
             "state_distribution": state_dist,
