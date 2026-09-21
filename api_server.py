@@ -180,6 +180,8 @@ def get_db(write: bool = False):
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size = -1000")   # v1.5.2: 限制单连接页缓存为 1MB
+    conn.execute("PRAGMA mmap_size = 0")        # v1.5.2: 禁用 mmap，防止 Linux 虚拟脏页沉淀
     conn.row_factory = sqlite3.Row
     try:
         if write:
@@ -724,7 +726,7 @@ if pending:
         _replay_wal_pending(wal, pending)
 
 # ===== FastAPI app =====
-app = FastAPI(title="白泽 (Bai Ze)", version="1.5.1")
+app = FastAPI(title="白泽 (Bai Ze)", version="1.5.2")
 
 # P2a: 本地可视化页浏览器直连需 CORS（本地服务，allow all）
 from fastapi.middleware.cors import CORSMiddleware
@@ -791,7 +793,7 @@ def health():
     return {
         "status": "ok",
         "service": "白泽 (Bai Ze)",
-        "version": "1.5.1-baize",
+        "version": "1.5.2-baize",
         "modules": {
             "gate": True,
             "fastpath": True,
@@ -828,7 +830,7 @@ def memory_health():
             evo = {}
     return {
         "status": "ok",
-        "version": "1.5.1-baize",
+        "version": "1.5.2-baize",
         "report": {
             "lane_distribution": lane_dist,
             "state_distribution": state_dist,

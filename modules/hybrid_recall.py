@@ -92,6 +92,8 @@ class HybridRecall:
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA cache_size = -1000")
+            conn.execute("PRAGMA mmap_size = 0")
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.execute(f"""
@@ -125,6 +127,12 @@ class HybridRecall:
                           _skipped: Optional[List] = None) -> List[Dict]:
         """P1-1: int8 量化向量余弦检索（numpy，毫秒级，不依赖 MAX_L2 经验值）。
 
+        v1.5.2 内存瘦身：游标流式 fetchmany 消费，杜绝 3.2 万行 Python 对象常驻堆内存。
+        每批 BATCH=2000 行：过滤坏 blob → 构造 numpy 矩阵 → 计算余弦得分 → 仅保留
+        轻量 (mem_id, score) 元组，释放原始 batch 引用。循环结束后拼接所有 chunk
+        的 ids/sims 做一次性 argpartition Top-k，数学结果与原始全量算法 100% 等价。
+        检索完成后显式 malloc_trim 归还瞬态堆内存。
+
         优先于 sqlite-vec float32 检索（存储 4x 压缩）。A4 加固：
         - 按 user_id 预过滤（JOIN memories，memory_vec_i8 无 user_id 列）
         - np.argpartition 取 top-k（替代全排序 argsort）
@@ -135,6 +143,7 @@ class HybridRecall:
           int8 侧不可见，等同双写缺行）
         """
         import numpy as np
+        import ctypes
         vector = self._get_embedding(query, input_type="query")
         if not vector:
             return []
@@ -142,50 +151,66 @@ class HybridRecall:
         q = q / (np.linalg.norm(q) + 1e-9)
         q8 = np.clip(np.round(q * 127), -127, 127).astype(np.int8)
 
+        qf = q8.astype(np.float32)
+        q_norm = np.linalg.norm(qf)
+
+        # --- 流式 fetchmany 消费：每批 2000 行，只保留 (id, sim) 轻量元组 ---
+        BATCH = 2000
+        all_ids: List[int] = []
+        all_sims_chunks: List = []  # list of np.ndarray
+
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA cache_size = -1000")
+        conn.execute("PRAGMA mmap_size = 0")
         conn.row_factory = sqlite3.Row
         try:
             # A4: 按 user_id 预过滤，缩小扫描集（memory_vec_i8 无 user_id 列 → JOIN）
             # B6: 排除 superseded 记忆，避免其向量在检索路径长期存活占用 top-k
-            rows = conn.execute(
+            cur = conn.execute(
                 """SELECT i.mem_id, i.vec
                    FROM memory_vec_i8 i
                    JOIN memories m ON m.id = i.mem_id
                    WHERE m.user_id = ?
                      AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')""",
                 (user_id,),
-            ).fetchall()
+            )
+            while True:
+                batch = cur.fetchmany(BATCH)
+                if not batch:
+                    break
+                # A4: 坏 blob 跳过该行，记录 warning，不整路径回退
+                chunk_ids = []
+                chunk_blobs = []
+                for r in batch:
+                    if len(r["vec"]) != EMBED_DIM:
+                        log.warning(f"Bad i8 vec for mem {r['mem_id']}: len={len(r['vec'])}")
+                        if _skipped is not None:
+                            _skipped.append(r["mem_id"])
+                        continue
+                    chunk_ids.append(r["mem_id"])
+                    chunk_blobs.append(r["vec"])
+                if not chunk_ids:
+                    del batch  # 释放该批原始引用
+                    continue
+                mat = np.frombuffer(b"".join(chunk_blobs), dtype=np.int8) \
+                    .reshape(-1, EMBED_DIM).astype(np.float32)
+                mat_norms = np.linalg.norm(mat, axis=1)
+                chunk_sims = (mat @ qf) / (mat_norms * q_norm + 1e-9)
+                all_ids.extend(chunk_ids)
+                all_sims_chunks.append(chunk_sims)
+                # 显式释放该批原始 sqlite3.Row 对象与 blob 列表
+                del batch, chunk_blobs, mat
         finally:
             conn.close()
-        if not rows:
+
+        if not all_ids:
             return []
 
-        # A4: 坏 blob 跳过该行，记录 warning，不整路径回退
-        valid = []
-        for r in rows:
-            if len(r["vec"]) != EMBED_DIM:
-                log.warning(f"Bad i8 vec for mem {r['mem_id']}: len={len(r['vec'])}")
-                if _skipped is not None:
-                    _skipped.append(r["mem_id"])
-                continue
-            valid.append(r)
-        if not valid:
-            return []
-
-        ids = [r["mem_id"] for r in valid]
-        qf = q8.astype(np.float32)
-        q_norm = np.linalg.norm(qf)
-
-        # Batch matrix ops to cap peak memory (B: watermark control)
-        BATCH = 2000
-        sims = np.empty(len(valid), dtype=np.float32)
-        for start in range(0, len(valid), BATCH):
-            chunk = valid[start:start + BATCH]
-            mat = np.frombuffer(b"".join(r["vec"] for r in chunk), dtype=np.int8) \
-                .reshape(-1, EMBED_DIM).astype(np.float32)
-            mat_norms = np.linalg.norm(mat, axis=1)
-            sims[start:start + len(chunk)] = (mat @ qf) / (mat_norms * q_norm + 1e-9)
+        ids = all_ids
+        sims = np.concatenate(all_sims_chunks) if len(all_sims_chunks) > 1 else (
+            all_sims_chunks[0] if all_sims_chunks else np.empty(0, dtype=np.float32))
+        del all_sims_chunks  # 释放分块列表引用
         sims = (sims + 1.0) / 2.0  # [-1,1] → [0,1]
 
         # 2026-09-17 第一刀：初筛过采样（Over-fetching），从 limit 提升至 max(limit * 5, 25)
@@ -205,6 +230,8 @@ class HybridRecall:
             ph = ",".join("?" * len(top))
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA cache_size = -1000")
+            conn.execute("PRAGMA mmap_size = 0")
             conn.row_factory = sqlite3.Row
             try:
                 rows2 = conn.execute(
@@ -234,6 +261,13 @@ class HybridRecall:
                     "relevance": round(float(sims[i]), 3),  # C7: 向量余弦相似度
                     "score": round(final_score, 3),
                 })
+
+        # v1.5.2: 检索完成后归还瞬态堆内存，避免 glibc 堆内存仅增不减
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+
         return results
 
     def search(self, query, user_id="default", limit=5, return_trace=False):
@@ -303,6 +337,8 @@ class HybridRecall:
             cutoff = datetime.fromtimestamp(pool_now - 172800).isoformat()
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA cache_size = -1000")
+            conn.execute("PRAGMA mmap_size = 0")
             conn.row_factory = sqlite3.Row
             try:
                 recent_rows = conn.execute(
@@ -440,6 +476,8 @@ class HybridRecall:
         uniq = list(dict.fromkeys(ids))
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA cache_size = -1000")
+        conn.execute("PRAGMA mmap_size = 0")
         conn.row_factory = sqlite3.Row
         try:
             cur = conn.cursor()
@@ -475,6 +513,8 @@ class HybridRecall:
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA cache_size = -1000")
+            conn.execute("PRAGMA mmap_size = 0")
             conn.row_factory = sqlite3.Row
             try:
                 cur = conn.cursor()
@@ -666,6 +706,8 @@ class HybridRecall:
 
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA cache_size = -1000")
+        conn.execute("PRAGMA mmap_size = 0")
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
         try:
@@ -745,6 +787,8 @@ class HybridRecall:
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA cache_size = -1000")
+            conn.execute("PRAGMA mmap_size = 0")
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             # vec0 虚表不支持 INSERT OR REPLACE，主键存在时会抛 UNIQUE 异常，
@@ -856,6 +900,8 @@ class HybridRecall:
             return None
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA cache_size = -1000")
+        conn.execute("PRAGMA mmap_size = 0")
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
         cur = conn.cursor()

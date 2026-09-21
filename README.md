@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Framework-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
-[![Release: v1.5.1](https://img.shields.io/badge/Release-v1.5.1--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
+[![Release: v1.5.2](https://img.shields.io/badge/Release-v1.5.2--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
 [![Platform: Linux/Debian](https://img.shields.io/badge/Platform-Debian%20Native-blue.svg)](#)
 
 </div>
@@ -28,7 +28,7 @@
 
 ## ✨ 核心特性 (Key Features)
 
-- 🚪 **双端 System One 智能门控 (Jev Ingest & Search Dual-Gate · v1.5.1 新增)**：
+- 🚪 **双端 System One 智能门控 (Jev Ingest & Search Dual-Gate · v1.5.2 新增)**：
   - **写入端闲聊快筛 (Ingest Gate)**：引入 TypeSafe Jev 轻量判别模型，毫秒级拦截无价值闲聊与瞬态过渡语（`noul < 0.25`），跳过昂贵的大模型提取链，节省 70% Token 消耗并杜绝知识库水化；
   - **召回端智能门神 (Search Gate)**：告别死板正则，主用 Jev 语义意图识别 + Laya HF 在线 Space 兜底，配合显式口令 0ms 白名单直通与 Fail-open 容灾，实现“该想时心领神会，不该想时绝不添乱”。
 - 🛡️ **四道认知防御铁壁 (Cognitive Defense & Tombstone)**：
@@ -52,7 +52,7 @@
 ## 🏗️ 架构拓扑 (Architecture)
 
 <div align="center">
-  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.1「天禄·天眼」全景架构拓扑" width="100%" />
+  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.2「天禄·天眼」全景架构拓扑" width="100%" />
 </div>
 
 <details>
@@ -67,7 +67,7 @@
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│               白泽 v1.5.1「天禄·天眼」内核架构 (TianLu Engine)          │
+│               白泽 v1.5.2「天禄·天眼」内核架构 (TianLu Engine)          │
 │                                                                        │
 │  ┌──────────────────────┐              ┌────────────────────────────┐  │
 │  │     写入与演化链路   │              │        追忆与检索链路      │  │
@@ -166,8 +166,8 @@ memory:
 
 ## 📚 详细技术文档 (Documentation)
 
-- 📜 [白泽 v1.5.1 完整技术白皮书（天禄·天眼现役版）](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
-- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.1 完整演进历史与历次架构审计结论
+- 📜 [白泽 v1.5.2 完整技术白皮书（天禄·天眼现役版）](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
+- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.2 完整演进历史与历次架构审计结论
 
 ---
 
