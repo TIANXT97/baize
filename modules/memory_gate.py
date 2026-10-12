@@ -50,6 +50,16 @@ QUESTION_PATTERNS = re.compile(
 )
 
 
+def _compile_gate_regex(patterns, name: str):
+    cleaned = [f"(?:{p})" for p in (patterns or []) if isinstance(p, str) and p.strip()]
+    if not cleaned:
+        return re.compile(r"(?!x)x")  # 永不匹配，防止空串恒真
+    try:
+        return re.compile("|".join(cleaned), re.IGNORECASE)
+    except re.error:
+        return re.compile(r"(?!x)x")
+
+
 class MemoryGate:
     """Lightweight relevance gate using keyword matching + time window.
 
@@ -61,21 +71,36 @@ class MemoryGate:
         self.jev_gate = jev_gate
         self._last_memory_time: float = 0
         self._last_needs_memory: bool = False
-        self._explicit_search_re = re.compile("|".join(EXPLICIT_SEARCH_PATTERNS), re.IGNORECASE)
-        self._pass_phrase_re = re.compile("|".join(GATE_PASS_PHRASES), re.IGNORECASE)
-        self._trigger_re = re.compile("|".join(MEMORY_TRIGGERS), re.IGNORECASE)
-        self._no_memory_re = re.compile("|".join(NO_MEMORY_PATTERNS), re.IGNORECASE)
+        # Qwen 3.8 Max 补丁：包裹非捕获组 + 防空正则恒真 + 异常兜底
+        self._explicit_search_re = _compile_gate_regex(EXPLICIT_SEARCH_PATTERNS, name="explicit_search")
+        self._pass_phrase_re = _compile_gate_regex(GATE_PASS_PHRASES, name="pass_phrase")
+        self._trigger_re = _compile_gate_regex(MEMORY_TRIGGERS, name="trigger")
+        self._no_memory_re = _compile_gate_regex(NO_MEMORY_PATTERNS, name="no_memory")
 
     def needs_memory(self, message: str, force: Optional[bool] = None) -> bool:
+        # Qwen 3.8 Max 补丁：类型安全防御，防 AttributeError/TypeError 击穿
+        if message is None:
+            msg = ""
+        elif isinstance(message, str):
+            msg = message
+        else:
+            try:
+                msg = str(message)
+            except Exception:
+                msg = ""
+
+        # 门控判定截断探测，防超长构造文本 ReDoS
+        msg = msg[:8192].strip()
+
         # 纠正信号强制通过
-        if CORRECTION_PATTERNS.search(message.strip()):
+        if CORRECTION_PATTERNS.search(msg):
             self._update_state(True)
             return True
 
         if force is not None:
             self._update_state(force)
             return force
-        msg = message.strip()
+
         if not msg:
             self._update_state(False)
             return False

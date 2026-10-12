@@ -300,7 +300,7 @@ if jev_gate:
     gate.jev_gate = jev_gate  # inject jev_gate into MemoryGate for search-side gating
 
 
-# Reranker — Voyage rerank-2.5-lite 主用 + bge-reranker-v2-m3 兜底（自动读 .voyage_key / BAIZE_VOYAGE_KEY 与 .embed_key）
+# Reranker — Voyage rerank-3-lite 主用 + bge-reranker-v2-m3 兜底（自动读 .voyage_key / BAIZE_VOYAGE_KEY 与 .embed_key）
 reranker = Reranker()
 
 auto_dream = AutoDream(
@@ -440,7 +440,11 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     facts = []
 
     # Try fastpath first
-    fp_result = fastpath.try_extract(text)
+    try:
+        fp_result = fastpath.try_extract(text)
+    except Exception as e:
+        log.warning(f"fastpath fail-open: {e}")
+        fp_result = None
     if fp_result:
         facts.append(fp_result)
 
@@ -454,20 +458,23 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
         except Exception as e:
             llm_failed = True
             llm_fail_reason = str(e)
-            log.error(f"LLM extraction unavailable, refusing raw-text fallback: {e}")
+            log.error(f"LLM extraction error: {e}")
 
+    # Qwen 3.8 Max 补丁：消灭静默丢失！若提取失败或 0 事实，写入可追踪降级事实
     if not facts:
-        # Reform: 彻底铲除 fallback 生肉后门！LLM 返回 0 事实时绝对不落盘
         if llm_failed:
-            log.error(
-                f"Skip store: LLM chain unavailable for source={source} "
-                f"(would have written raw text as fallback). reason={llm_fail_reason}"
-            )
+            log.warning(f"Memory extraction failed, storing degraded fallback. reason={llm_fail_reason}")
+            # 标记为 raw_fallback 留存，绝不静默丢失
+            facts.append({
+                "fact": text.strip()[:500],
+                "category": "raw_fallback",
+                "lane": "procedural",
+                "importance": 0.4,
+                "source": f"{source}_degraded",
+            })
+        else:
+            log.info(f"LLM returned 0 facts, text rejected. len={len(text.strip())}")
             return []
-        log.info(
-            f"LLM returned 0 facts, raw text strictly rejected. len={len(text.strip())}"
-        )
-        return []
 
     if not facts:
         return []
@@ -549,11 +556,21 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
             lane = fact.get("category") if fact.get("category") in decay.LANE_CONFIG else decay.classify_lane(fact["fact"], fact.get("category", "general"))
             # Reform: 强制打标 origin
             fact_origin = msg_origin
+            # 2026-09-23 v4 存根闸（五人会诊共识）：低信息量短句 = 抽取端"实体脱落"
+            # 产物（如"用户有三个账号"），默认降权至 0.3——丧失与带细节的老条
+            # 争夺榜首的资格（Gemini 存根降权 + Opus 最小信息量门槛）。判定两条：
+            # ① 显式重要度未超 0.7（尊重上游对 identity/rule 的显式加权）；
+            # ② 长度 < 20 字符且不含具体实体串（英文/编号/路径/时间等）。
+            imp = fact.get("importance", 0.5)
+            _content = fact["fact"].strip()
+            _has_concrete = bool(re.search(r"[0-9a-zA-Z_/.:\-]{3,}", _content))
+            if imp is not None and imp < 0.7 and len(_content) < 20 and not _has_concrete:
+                imp = 0.3
             cur.execute(
                 """INSERT INTO memories (user_id, category, content, lane, importance, source, origin)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (user_id, fact.get("category", "general"), fact["fact"],
-                 lane, fact.get("importance", 0.5), fact.get("source", source), fact_origin)
+                 lane, imp, fact.get("source", source), fact_origin)
             )
             mem_id = cur.lastrowid
             stored.append({"id": mem_id, "content": fact["fact"], "lane": lane})
@@ -726,7 +743,7 @@ if pending:
         _replay_wal_pending(wal, pending)
 
 # ===== FastAPI app =====
-app = FastAPI(title="白泽 (Bai Ze)", version="1.5.2")
+app = FastAPI(title="白泽 (Bai Ze)", version="1.5.3")
 
 # P2a: 本地可视化页浏览器直连需 CORS（本地服务，allow all）
 from fastapi.middleware.cors import CORSMiddleware
@@ -793,7 +810,7 @@ def health():
     return {
         "status": "ok",
         "service": "白泽 (Bai Ze)",
-        "version": "1.5.2-baize",
+        "version": "1.5.3-baize",
         "modules": {
             "gate": True,
             "fastpath": True,
@@ -830,7 +847,7 @@ def memory_health():
             evo = {}
     return {
         "status": "ok",
-        "version": "1.5.2-baize",
+        "version": "1.5.3-baize",
         "report": {
             "lane_distribution": lane_dist,
             "state_distribution": state_dist,

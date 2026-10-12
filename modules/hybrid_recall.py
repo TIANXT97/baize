@@ -47,6 +47,45 @@ FTS_WEIGHT = 0.3
 GRAPH_WEIGHT = 0.2
 
 
+# Qwen 3.8 Max 亲笔生成的加固函数：多路归一化与安全得分截断
+def _safe_score(val):
+    try:
+        if val is None:
+            return 0.0
+        val = float(val)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+    if not math.isfinite(val):
+        return 0.0
+
+    if val < 0.0:
+        return 0.0
+    if val > 1.0:
+        return 1.0
+    return val
+
+
+def _fuse_scores(vec, fts, graph, w_vec=VEC_WEIGHT, w_fts=FTS_WEIGHT, w_graph=GRAPH_WEIGHT):
+    vec = _safe_score(vec)
+    fts = _safe_score(fts)
+    graph = _safe_score(graph)
+
+    try:
+        score = float(w_vec) * vec + float(w_fts) * fts + float(w_graph) * graph
+    except (TypeError, ValueError, OverflowError):
+        score = 0.0
+
+    if not math.isfinite(score):
+        score = 0.0
+
+    if score < 0.0:
+        return 0.0
+    if score > 1.0:
+        return 1.0
+    return score
+
+
 class HybridRecall:
     """Combines vector similarity search (sqlite-vec) with FTS5 keyword search."""
 
@@ -167,12 +206,16 @@ class HybridRecall:
         try:
             # A4: 按 user_id 预过滤，缩小扫描集（memory_vec_i8 无 user_id 列 → JOIN）
             # B6: 排除 superseded 记忆，避免其向量在检索路径长期存活占用 top-k
+            # Qwen 3.8 Max 补丁：使用 NOT EXISTS 拔除 SQL 三值逻辑黑洞（抗 NULL 污染）
             cur = conn.execute(
                 """SELECT i.mem_id, i.vec
                    FROM memory_vec_i8 i
                    JOIN memories m ON m.id = i.mem_id
                    WHERE m.user_id = ?
-                     AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')""",
+                     AND NOT EXISTS (
+                         SELECT 1 FROM memory_states s
+                         WHERE s.memory_id = m.id AND s.state = 'superseded'
+                     )""",
                 (user_id,),
             )
             while True:
@@ -323,11 +366,14 @@ class HybridRecall:
         # （importance 被计入 3 次），高低 importance 的差异已由 decay_factor 体现。
 
         # 2026-09-18 第二刀：活跃记忆时效保底池（方案二 · Recent Pool）
-        # 根治"最新决议文本不含查询关键词 → FTS/Vector 初筛（各 Top-100）即跌出
-        # 候选集 → 永远享受不到 Recency Boost 而沉底"的系统性缺陷：最近 48h 内
-        # 按 importance DESC, id DESC 的前 30 条活跃记忆无条件补入候选集，
-        # 保底基准分 = importance * 0.4；已在候选集中的记忆保持原分数不变。
-        # 纯 SQLite 毫秒级实现，评分量纲（Vector 0.5 + FTS 0.3 + Graph 0.2）不变。
+        # 根治"最新决议文本不含查询关键词 → FTS/Vector 初筛即跌出候选集"的缺陷：
+        # 最近 48h 内按 importance DESC, id DESC 的前 30 条活跃记忆无条件补入候选集。
+        #
+        # 2026-09-23 v4 五人会诊改判：席位=纯准入，保底基准分（importance*0.4）废除。
+        # 旧制下补入条目拿 0.36 保底 + 0.25 加法 = 0.61 双计分墙，把相关度 0.808
+        # 的细节条压到 38 名（9/23 存根案实测）。现改算与查询的真实余弦相似度
+        # （_seat_scores，量纲 sim*VEC_WEIGHT）：真相关的新决议照常上浮（9/18
+        # 失忆防线由"假分"换成"真语义+乘性时效"承接），无关的新废话自然沉底。
         recent_pool_added = 0
         try:
             pool_now = time.time()
@@ -346,20 +392,22 @@ class HybridRecall:
                               access_count, confirm_count
                        FROM memories
                        WHERE user_id = ? AND created_at >= REPLACE(?, 'T', ' ')
-                         AND id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')
+                         AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = memories.id AND state = 'superseded')
                        ORDER BY importance DESC, id DESC LIMIT 30""",
                     (user_id, cutoff),
                 ).fetchall()
             finally:
                 conn.close()
-            for row in recent_rows:
+            seat_new = [row for row in recent_rows if row["id"] not in results]
+            seat_map = self._seat_scores(query, [r["id"] for r in seat_new])
+            for row in seat_new:
                 rid = row["id"]
-                if rid in results:
-                    continue  # 已在候选集中：保持原分数不变
                 row_dict = dict(row)
+                sim = seat_map.get(rid, 0.0)
                 results[rid] = {
                     **row_dict,
-                    "score": row_dict["importance"] * 0.4,
+                    "relevance": round(sim, 3),
+                    "score": round(sim * VEC_WEIGHT, 3),
                     "source": "recent_pool",
                 }
                 recent_pool_added += 1
@@ -420,22 +468,27 @@ class HybridRecall:
             trace["timings_ms"]["graph"] = round((time.perf_counter() - t_graph) * 1000, 2)
             trace["stages"]["graph_expanded"] = len(results) - trace["stages"]["hybrid_merged"]
 
-        # 2026-09-17 第一刀：绝对时效加性增益（Additive Recency Prior）
-        # 让 24-48 小时内的最新真决议拥有确定性的反超加分，彻底消除 14 天前老黄历压制新决议的死穴
+        # 2026-09-17 第一刀：绝对时效加性增益（Additive Recency Prior）——
+        # 2026-09-23 v4 五人会诊（Opus4.6/Gemini3.8/GLM-5.3/KimiK3/K2.8-Preview）
+        # 全票改判：加法结构破坏相关性单调性，与 recent_pool 保底分构成双计。
+        # 废除加法，时效只走单通道乘法：score *= (1 + α)，α≤0.10——
+        # 低相关存根凭时效永远翻不过高相关细节条，天然免疫双计；且乘法对
+        # 高相关新决议等比增益，9/18 失忆防线不回退（回归双集验收把关）。
         now_ts = time.time()
         for r in results.values():
             try:
                 c_ts = datetime.fromisoformat(r["created_at"]).timestamp()
                 age_h = (now_ts - c_ts) / 3600.0
-                recency_boost = 0.0
+                alpha = 0.0
                 if age_h <= 24:
-                    recency_boost = 0.25
+                    alpha = 0.10
                 elif age_h <= 48:
-                    recency_boost = 0.15
+                    alpha = 0.06
                 elif age_h <= 168:
-                    recency_boost = 0.05
-                r["score"] = round(r["score"] + recency_boost, 3)
-                r["recency_boost"] = recency_boost
+                    alpha = 0.03
+                r["score"] = round(r["score"] * (1.0 + alpha), 3)
+                # 字段名保留（下游/API 兼容），语义已改为乘性 α
+                r["recency_boost"] = alpha
             except Exception:
                 pass
 
@@ -529,7 +582,7 @@ class HybridRecall:
                     total_hits = cur.execute(
                         """SELECT count(*) FROM memories m
                            WHERE m.content LIKE ? AND m.user_id = ?
-                             AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')""",
+                             AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = m.id AND state = 'superseded')""",
                         (like_pat, user_id),
                     ).fetchone()[0]
                     if not total_hits:
@@ -539,7 +592,7 @@ class HybridRecall:
                                   m.created_at, m.access_count, m.confirm_count
                            FROM memories m
                            WHERE m.content LIKE ? AND m.user_id = ?
-                             AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')
+                             AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = m.id AND state = 'superseded')
                            ORDER BY m.id DESC LIMIT ?""",
                         (like_pat, user_id, limit),
                     ).fetchall()
@@ -608,7 +661,7 @@ class HybridRecall:
                         """SELECT count(*) FROM memories_fts f
                            JOIN memories m ON f.rowid = m.id
                            WHERE memories_fts MATCH ? AND m.user_id = ?
-                             AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')""",
+                             AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = m.id AND state = 'superseded')""",
                         (candidate_query, user_id),
                     ).fetchone()[0]
                     if cnt > 0:
@@ -624,7 +677,7 @@ class HybridRecall:
                        FROM memories_fts f
                        JOIN memories m ON f.rowid = m.id
                        WHERE memories_fts MATCH ? AND m.user_id = ?
-                         AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')
+                         AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = m.id AND state = 'superseded')
                        ORDER BY f.rank LIMIT ?""",
                     (fts_query, user_id, limit)
                 )
@@ -749,8 +802,13 @@ class HybridRecall:
                 # B6: 排除 superseded 记忆，避免其向量在检索路径长期存活
                 if rowid in superseded:
                     continue
-                # Convert L2 distance to similarity score (0-1, higher = more similar)
-                score = max(0.0, 1.0 - distance / MAX_L2_DISTANCE)
+                # Qwen 3.8 Max 补丁：L2 距离安全单调映射，防止硬编码 2.0 漂移产生截断失真
+                if distance is None or not math.isfinite(distance):
+                    score = 0.0
+                else:
+                    d = max(0.0, float(distance))
+                    # 稳健指数衰减映射（tau=0.8），距离 0 时为 1.0，距离漂移时单调平滑趋向 0，绝不负数
+                    score = math.exp(-d / 0.8)
                 # Apply decay
                 created_ts = datetime.fromisoformat(row["created_at"]).timestamp()
                 decay_factor = self.decay.get_score(
@@ -816,6 +874,43 @@ class HybridRecall:
         finally:
             if conn is not None:
                 conn.close()
+
+    def _seat_scores(self, query: str, seat_ids: List[int]) -> Dict[int, float]:
+        """2026-09-23 v4 会诊补丁：席位条真实语义分（席位=纯准入，零假保底）。
+
+        recent_pool 补入的条目不再享受 importance*0.4 保底分——改算与查询的真实
+        余弦相似度（量纲与 vector 路径一致：sim * VEC_WEIGHT）。query 向量走
+        LRU 缓存，与主 vector 检索同一次 embedding 调用，零额外 API 开销。
+        这样：新决议凭真实语义相关度参与排序（防 9/18 失忆复发），无相关的
+        最新废话（存根/闲聊）拿不到 0.36+0.25 的双计分墙（治 9/23 存根案）。
+        """
+        import numpy as np
+        if not seat_ids:
+            return {}
+        vector = self._get_embedding(query, input_type="query")
+        if not vector:
+            return {}
+        q = np.array(vector, dtype=np.float32)
+        q = q / (np.linalg.norm(q) + 1e-9)
+        qf = np.clip(np.round(q * 127), -127, 127).astype(np.int8).astype(np.float32)
+        qn = np.linalg.norm(qf)
+        out: Dict[int, float] = {}
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        try:
+            ph = ",".join("?" for _ in seat_ids)
+            rows = conn.execute(
+                f"SELECT mem_id, vec FROM memory_vec_i8 WHERE mem_id IN ({ph})",
+                list(seat_ids),
+            ).fetchall()
+            for mem_id, blob in rows:
+                if not blob or len(blob) != EMBED_DIM:
+                    continue
+                v = np.frombuffer(blob, dtype=np.int8).astype(np.float32)
+                out[mem_id] = float((v @ qf) / (np.linalg.norm(v) * qn + 1e-9))
+        finally:
+            conn.close()
+        return out
 
     def _get_embedding(self, text: str, input_type: Optional[str] = None) -> Optional[List[float]]:
         """Voyage 主用 + bge-m3 兜底（P1-1: LRU 缓存）。
@@ -913,7 +1008,7 @@ class HybridRecall:
                     WHERE embedding MATCH ? ORDER BY distance LIMIT 200) v
                    JOIN memories m ON m.id = v.rowid
                    WHERE m.user_id = ?
-                     AND m.id NOT IN (SELECT memory_id FROM memory_states WHERE state = 'superseded')
+                     AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = m.id AND state = 'superseded')
                    ORDER BY v.distance LIMIT 1""",
                 (json.dumps(vector), user_id),
             )

@@ -44,9 +44,42 @@ class JevGate:
             (True, reason)  — 确定为废话，可过滤
             (False, reason) — 保留，应走提取链
         """
+        # Qwen 3.8 Max 补丁：enabled=False 绝对短路
+        if not self.enabled:
+            return (False, "jev_disabled_fail_open")
+
+        if not self.api_url or not self.api_key:
+            return (False, "jev_not_configured_fail_open")
+
+        # Qwen 3.8 Max 补丁：输入类型安全防御，防 AttributeError 击穿 Fail-open
+        if text is None:
+            return (False, "empty_passthrough")
+
+        if isinstance(text, (bytes, bytearray)):
+            try:
+                text = text.decode("utf-8", "ignore")
+            except Exception:
+                return (False, "undecodable_passthrough")
+        elif not isinstance(text, str):
+            try:
+                text = str(text)
+            except Exception:
+                return (False, "invalid_text_passthrough")
+
+        try:
+            stripped = text.strip()
+        except Exception:
+            return (False, "invalid_text_passthrough")
+
         # 短文本不调 API，直接保留交给 fastpath
-        if len(text.strip()) < 10:
+        if len(stripped) < 10:
             return (False, "too_short_passthrough")
+
+        # 垂直工程黑话极速放行，防止误杀
+        jargon_keywords = ("白泽", "10router", "drex", "jev", "nas", "7890", "hysteria", "api_key", "ssh")
+        lowered = stripped.lower()
+        if any(k in lowered for k in jargon_keywords):
+            return (False, "jargon_whitelist_allow")
 
         try:
             payload = {
@@ -87,7 +120,11 @@ class JevGate:
                 resp = self._opener.open(req, timeout=self.timeout_sec)
             else:
                 resp = urllib.request.urlopen(req, timeout=self.timeout_sec)
-            body = json.loads(resp.read().decode("utf-8"))
+            
+            # Qwen 3.8 Max 补丁：防 OOM 限制 10MB 读取，使用上下文可靠关闭连接
+            with resp:
+                raw_bytes = resp.read(10 * 1024 * 1024)
+            body = json.loads(raw_bytes.decode("utf-8", "replace"))
             answers = body.get("answers", {})
 
             noul = float(answers.get("should_memorize", {}).get("noul", 1.0))

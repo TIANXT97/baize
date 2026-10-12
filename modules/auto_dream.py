@@ -71,12 +71,16 @@ class AutoDream:
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
 
-            payload = json.dumps({
+            payload_dict = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "max_tokens": 4096,
-            }).encode("utf-8")
+            }
+            # 记忆蒸馏岗位显式关闭推理思考，提速且防止吞爆预算
+            payload_dict["reasoning_effort"] = "none"
+
+            payload = json.dumps(payload_dict).encode("utf-8")
 
             req = urllib.request.Request(
                 f"{self.api_url}/chat/completions",
@@ -85,10 +89,24 @@ class AutoDream:
                 method="POST",
             )
 
+            # Qwen 3.8 Max 补丁：防 OOM 限制 2MB 读取上限
             with urllib.request.urlopen(req, timeout=120) as resp:
-                result = json.loads(resp.read())
+                raw_bytes = resp.read(2 * 1024 * 1024)
+            result = json.loads(raw_bytes.decode("utf-8", "replace"))
 
-            choice = result["choices"][0]["message"]
+            # Qwen 3.8 Max 补丁：结构安全解包防御，防 KeyError / IndexError / TypeError 击穿
+            if not isinstance(result, dict):
+                return None
+            choices = result.get("choices")
+            if not isinstance(choices, list) or not choices:
+                return None
+            first = choices[0]
+            if not isinstance(first, dict):
+                return None
+            choice = first.get("message")
+            if not isinstance(choice, dict):
+                return None
+
             content = choice.get("content", "")
             reasoning = choice.get("reasoning_content", "")
 

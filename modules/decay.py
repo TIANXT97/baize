@@ -27,19 +27,28 @@ class DecayManager:
     def get_score(self, lane, created_at, access_count=0, importance=0.5, confirm_count=0):
         config = LANE_CONFIG.get(lane, LANE_CONFIG["general"])
         if config["multiplier"] == 0.0:
-            # P2b: 零衰减轨道（identity/preference/secret）按被确认次数追加置信度 boost，
-            # 封顶 0.2（confirm_count×0.05），总分上限提高到 0.95 让反复确认的
-            # 偏好可超过普通 0.8 基线。普通轨道不加 boost 避免过度加权。
-            # secret lane 锁死 1.0，不随次数变化，避免泄露访问模式
             if lane == "secret":
                 return 1.0
-            confirm_boost = min(0.2, confirm_count * 0.05)
-            return min(0.95, max(0.8, importance) + confirm_boost)
-        age_days = (time.time() - created_at) / 86400
-        decay = math.exp(-LAMBDA * config["multiplier"] * age_days)
-        access_boost = min(0.2, access_count * 0.02)
-        score = importance * decay + access_boost
-        return max(0.0, min(1.0, score))
+            confirm_boost = min(0.2, max(0, int(confirm_count or 0)) * 0.05)
+            return min(0.95, max(0.8, float(importance or 0.5)) + confirm_boost)
+
+        # Qwen 3.8 Max 补丁：时间戳安全净化，防负龄期与 exp 溢出
+        try:
+            created = float(created_at or time.time())
+            age_days = max(0.0, (time.time() - created) / 86400.0)
+            multiplier = float(config.get("multiplier", 1.0))
+            if not math.isfinite(multiplier) or multiplier <= 0:
+                multiplier = 1.0
+            lam = abs(float(LAMBDA))
+            decay = math.exp(max(-745.0, -lam * multiplier * age_days))
+            acc = max(0, int(access_count or 0))
+            imp = float(importance or 0.0)
+            access_boost = min(0.2, acc * 0.02)
+            score = imp * decay + access_boost
+            return max(0.0, min(1.0, score))
+        except Exception:
+            # 异常时 fail-open 返回高分，绝不因坏数据造成误归档/误删除
+            return 1.0
 
     def evolve_importance(self, importance, access_count):
         """F1: 高频记忆 importance 微升（封顶 0.9）。access_count 每 10 次 +0.05。

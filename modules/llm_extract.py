@@ -36,6 +36,8 @@ fact必须是完整中文描述句。例如：
 
 **实体完整性铁律**：提取事实时必须显式补齐主语、宿主与操作主体环境（例如：禁止只说“裁定保留两个模型”或“修改了配置”，必须补齐为“在 10router 中裁定保留两个模型”、“在 NAS 宿主上修改了配置”；禁止出现脱离上下文的无主断句）。
 
+**锚词铁律（2026-09-24，治实体脱落复发）**：原文中的系统名/组件名（如 10router、baize、NAS、mihomo）、自造代号（如 斑蝥协议、金丝雀B）、数字与区间（端口号 20000-20100、版本号、路径、邮箱）都是检索锚词，必须原样保留在 fact 里。严禁把带锚词的原文压成泛化空壳——错误示范：“用户拥有三个账号”“端口池方案已定稿”；正确示范：“10router 中三剑客反重力账号为 antigravity/vasyle/camellia”“10router 端口池方案定稿为 20000-20100 区间”。丢了锚词，这条记忆将来就搜不出来，等于没记。
+
 重要：只要是事实性信息就提取，不要跳过任何内容。如果没有事实，返回[]。
 
 文本：
@@ -47,6 +49,22 @@ VALID_CATEGORIES = (
     "identity", "preference", "emotion", "lesson", "rule",
     "procedural", "evidence", "knowledge", "general",
 )
+
+
+def _extract_anchors(text: str) -> List[str]:
+    """从原文抽强锚词：ASCII 标识符（≥3 字符，含字母）+ 数字/区间/版本。
+
+    只取"客观可核对"的硬锚点（10router、20000-20100、v1.5.2、xxx@...），
+    不做中文分词——中文主题词的保持交给 Prompt 铁律与召回层，此处只兜最硬的底。
+    """
+    ascii_ids = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.\-]{2,}", text)
+    nums = re.findall(r"\d[\d\-.~]{2,}", text)
+    out = []
+    for a in ascii_ids + nums:
+        a = a.strip(".-_")
+        if len(a) >= 3 and a not in out:
+            out.append(a)
+    return out[:20]
 
 
 class LLMExtractor:
@@ -122,9 +140,8 @@ class LLMExtractor:
                     "max_tokens": self.max_tokens,
                     "temperature": 0.1,
                 }
-                # 针对 deepseek 等推理模型，在记忆事实提取岗位显式关闭推理思考，提速且防止吞爆预算
-                if "deepseek" in endpoint["model"].lower():
-                    payload["reasoning_effort"] = "none"
+                # 记忆提取岗位显式关闭推理思考，提速且防止吞爆预算
+                payload["reasoning_effort"] = "none"
 
                 data = json.dumps(payload).encode()
                 req = urllib.request.Request(
@@ -135,10 +152,19 @@ class LLMExtractor:
                         "Content-Type": "application/json",
                     },
                 )
-                resp = urllib.request.urlopen(req, timeout=self.timeout_sec)
-                result = json.loads(resp.read())
-                content = result["choices"][0]["message"]["content"]
-                if content is None:
+                # Qwen 3.8 Max 亲笔生成的加固调用：限制 5MB，使用上下文安全关闭连接，防 OOM 与连接泄漏
+                with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
+                    raw_bytes = resp.read(5 * 1024 * 1024)
+                result = json.loads(raw_bytes.decode("utf-8", "replace"))
+
+                choices = result.get("choices") if isinstance(result, dict) else None
+                if not choices or not isinstance(choices, list):
+                    last_err = "malformed choices field"
+                    continue
+
+                message = choices[0].get("message", {})
+                content = message.get("content")
+                if not content or not str(content).strip():
                     last_err = "empty content field"
                     continue
                 return content, ""
@@ -201,6 +227,44 @@ class LLMExtractor:
         for f in facts:
             f["source"] = source
         log.info(f"LLM extracted {len(facts)} facts (model={used_model})")
+
+        # 2026-09-24 锚词验收门（治实体脱落，提取链首次引入质检）：
+        # 原文若含 ASCII 标识符/数字区间等强锚词，而所有 fact 一条都没带上——
+        # 说明提取端把记忆洗成了"无主空壳"（将来检索必丢）。带纠偏指令重试
+        # 一次；仍不合格则**放行原结果（fail-open）**，只记 warning 不卡流水线。
+        try:
+            anchors = _extract_anchors(text)
+            if anchors and facts and not any(
+                any(a in (f.get("fact") or "") for a in anchors) for f in facts
+            ):
+                log.warning(
+                    f"Anchor retention check FAILED (anchors={anchors[:6]}), "
+                    f"retrying extraction with corrective hint"
+                )
+                retry_prompt = prompt + (
+                    "\n\n**输出校验（违反即废单）**：以下锚词必须原样出现在对应 fact 中："
+                    + ", ".join(anchors[:12])
+                    + "。每条 fact 至少保留其对应的锚词，禁止压成泛化描述。"
+                )
+                content2, used2, fail2 = self._call_llm(retry_prompt)
+                if content2 is not None:
+                    facts2 = [
+                        {**f, "source": source}
+                        for f in self._parse_facts(content2)
+                    ]
+                    if facts2 and any(
+                        any(a in (f.get("fact") or "") for a in anchors)
+                        for f in facts2
+                    ):
+                        facts = facts2
+                        log.info(
+                            f"Anchor retention fixed on retry (model={used2}, "
+                            f"{len(facts)} facts)"
+                        )
+                    else:
+                        log.warning("Anchor retry still dropped anchors, fail-open with original")
+        except Exception as e:
+            log.warning(f"Anchor retention check error (fail-open): {e}")
 
         # Store in cache (deep copy to avoid mutation side-effects)
         import copy

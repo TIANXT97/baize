@@ -13,7 +13,7 @@ log = logging.getLogger("baize")
 import os as _os
 # Voyage 主用（200M 免费）+ bge-m3 兜底（SiliconFlow 免费）
 VOYAGE_RERANK_URL = "https://api.voyageai.com/v1/rerank"
-VOYAGE_RERANK_MODEL = "rerank-2.5-lite"
+VOYAGE_RERANK_MODEL = "rerank-3-lite"
 BGE_RERANK_URL = "https://api.siliconflow.cn/v1/rerank"
 BGE_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 # 兼容旧常量
@@ -24,7 +24,7 @@ EMBED_KEY_PATH_FB = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abs
 
 
 class Reranker:
-    """Voyage rerank-2.5-lite 主用 + bge-reranker-v2-m3 兜底（LRU cache）。"""
+    """Voyage rerank-3-lite 主用 + bge-reranker-v2-m3 兜底（LRU cache）。"""
 
     def __init__(self, api_key: str = "", api_url: str = RERANK_API_URL, model: str = RERANK_MODEL,
                  cache_size: int = 100, cache_ttl_sec: int = 300,

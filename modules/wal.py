@@ -32,10 +32,15 @@ class WALEngine:
     # -------------------- rotation helpers --------------------
 
     def _archive_path(self) -> str:
-        """Generate timestamped archive path next to the live WAL."""
+        """Generate unique timestamped archive path next to the live WAL.
+        
+        Qwen 3.8 Max 补丁：毫秒时间戳 + 随机串，防止重名覆盖历史归档。
+        """
+        import uuid
         base = Path(self.wal_path)
         ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        return str(base.with_suffix(f".jsonl.{ts}"))
+        uid = uuid.uuid4().hex[:8]
+        return str(base.with_suffix(f".jsonl.{ts}-{uid}"))
 
     def append(self, operation: str, data: Dict) -> None:
         """Append an operation to the WAL before executing it."""
@@ -51,10 +56,13 @@ class WALEngine:
                 with open(self.wal_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
                     f.flush()
-                    os.fsync(f.fileno())
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError as fe:
+                        log.warning(f"WAL fsync warning: {fe}")
         except Exception as e:
-            log.error(f"WAL append failed: {e}")
-            raise
+            # Qwen 3.8 Max 补丁：Fail-open 记录日志，绝不抛出阻断业务线程
+            log.error(f"WAL append failed (fail-open): {e}")
 
     def mark_complete(self, operation: str, data: Dict) -> None:
         """Mark an operation as complete in the WAL."""
@@ -70,10 +78,13 @@ class WALEngine:
                 with open(self.wal_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
                     f.flush()
-                    os.fsync(f.fileno())
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError as fe:
+                        log.warning(f"WAL fsync warning: {fe}")
         except Exception as e:
-            log.error(f"WAL mark_complete failed: {e}")
-            raise
+            # Qwen 3.8 Max 补丁：Fail-open 记录日志，销账异常绝不反向拖垮已成功的业务
+            log.error(f"WAL mark_complete failed (fail-open): {e}")
 
     def _maybe_rotate_locked(self) -> None:
         """Rotate WAL when it exceeds max_bytes. Must be called inside _wal_lock."""
@@ -87,6 +98,17 @@ class WALEngine:
             return
         archive = self._archive_path()
         os.replace(self.wal_path, archive)
+        
+        # Qwen 3.8 Max 补丁：目录元数据 fsync 同步，防止断电目录项损坏
+        try:
+            dir_fd = os.open(os.path.dirname(self.wal_path) or ".", os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+
         log.info(f"WAL rotated: {self.wal_path} ({size} bytes) -> {archive}")
 
     def _remove_expired_archives(self) -> int:
