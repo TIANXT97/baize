@@ -24,6 +24,7 @@
     ]
   },
   "jev_gate": {
+    "_comment": "System One 门控体系——JevGate 是标准抽象名，代表 System One 门控协议。生产环境可通过修改 api_url 指向私有 DREX 端点（如 https://drex.nace.ai/v1/systemone），DREX 是 System One 协议的私有化/垂直领域实现，输入输出与判别结构 100% 协议兼容。",
     "enabled": true,
     "api_key": "YOUR_TYPESAFE_JEV_API_KEY",
     "api_url": "https://api.typesafe.ai/v1/systemone",

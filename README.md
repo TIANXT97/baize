@@ -39,7 +39,7 @@
 - ⚡ **工业级排他事务与物理落盘 (P0 存储加固 · 天禄核心)**：
   - `get_db(write=True)` 引入 **`BEGIN IMMEDIATE`** 提前抢占写锁，从根源消灭并发读升写的 `SQLITE_BUSY` 死锁；
   - `wal.py` 写入后注入内核级 **`os.fsync()`**，确保应用层预写日志物理落盘，免疫硬件断电与 OOM 强杀。
-- 🌊 **活跃记忆时效保底池 (Recent Pool & Over-fetching)**：初筛过采样扩容至 100 条，并新增 48 小时前 30 条关键事实保底池（权重 0.4 保底 + 24h 内 +0.25 显式加权），根除最新决议被历史词频淹没的顽疾。
+- 🌊 **活跃记忆时效保底池 (Recent Pool & Over-fetching)**：初筛过采样扩容至 100 条，并新增 48 小时前 30 条关键事实保底池。v1.5.3 废除假保底分，改由 `_seat_scores` 计算与查询的真实余弦相似度；**v1.5.3-hotfix 新增**：防抖硬门槛 `MIN_SEAT_SIMILARITY = 0.15`，低于阈值不补入候选集，根治短 query 下席位挤掉真相关老事实的边界扰动。
 - ⏳ **9 轨道艾宾浩斯遗忘衰减 (9-Lane Ebbinghaus Decay)**：
   - `identity`（身份）、`preference`（偏好）：**永久零衰减**；
   - `rule`（铁律）、`procedural`（经验）、`knowledge`（知识）：缓慢衰减；
