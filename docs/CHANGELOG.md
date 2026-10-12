@@ -1,6 +1,18 @@
-# 📜 白泽记忆系统 · 全景演进与架构审计编年史（v1.0 ~ v1.5.2）
+# 📜 白泽记忆系统 · 全景演进与架构审计编年史（v1.0 ~ v1.5.3）
 
 ## 编年总表（Architecture Changelog）
+
+### 【v1.5.3-hotfix · 天禄·金汤·淬炼】 2026-10-12（生产边界打磨版）
+- **核心代号**：天禄·金汤·淬炼（淬火成钢，边界无瑕）
+- **动刀背景**：工位全代码走查发现 5 处 P2/P3 级边界隐患，经 GitHub issue 审评批准（#1-#6），一次性修复落地。
+- **核心改造**：
+  1. **[降级事实过期机制 · Issue #1]**：`raw_fallback` 写入时赋 `expires_at = now + 7d`；`auto_dream.py` 新增 `_cleanup_expired_fallbacks()` 周期巡检，物理删除过期降级事实并同步清理 float/int8 向量，根治无限积累污染库。
+  2. **[Recent Pool 防抖硬门槛 · Issue #2]**：`hybrid_recall.py` `_seat_scores` 结果映射后加 `MIN_SEAT_SIMILARITY = 0.15` 防抖门槛，低于阈值不补入候选集。根治短 query（如"那个"）下 Recent Pool 席位挤掉真相关老事实的边界扰动。
+  3. **[Hermes 插件层 search 超时优化 · Issue #3]**：`plugin/baize/__init__.py` `_passes_gate` 超时收缩至 2.0s（原 5s），异常或超时一律坚决 Fail-open 放行，确保主对话流丝滑无阻塞。
+  4. **[CoreMemory 边界防御 · Issue #4]**：`api_server.py` `_sync_core_memory_from_facts` 防御性编程 `row[0] if row else ""`，消灭非 default 用户首次写入时的无意义 warning 日志。
+  5. **[CoreMemory 截断循环 O(n²) 优化 · Issue #6]**：`api_server.py` 采用逆序累加预计算替代 `while` 循环，原实现每次迭代重新 `"\n".join(lines)` 是 O(n²)。新实现 O(n) 更优雅规范。
+
+---
 
 ### 【v1.5.3 · 天禄·金汤】 2026-10-12（现役生产实弹版）
 - **核心代号**：天禄·金汤（金汤固锁，固若磐石）

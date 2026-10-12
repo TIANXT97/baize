@@ -116,4 +116,4 @@
 
 5. **WAL 容灾与降级事实不沉底**：
    - `wal.py` 写入操作全面引入 Fail-open 机制，fsync 警告不反向阻断业务；归档文件追加毫秒与 UUID，彻底消除并发重名覆盖；
-   - 提取链失败时自动记录 `raw_fallback`，绝不静默丢失。
+   - 提取链失败时自动记录 `raw_fallback`，绝不静默丢失；**v1.5.3-hotfix 新增**：`raw_fallback` 写入时赋 `expires_at = now + 7d`，AutoDream 周期巡检物理清退过期降级事实并注销向量，根治无限积累污染库。
