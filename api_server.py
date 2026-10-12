@@ -13,7 +13,7 @@ import logging
 import threading
 import uuid
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from typing import Optional
 
@@ -392,8 +392,12 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
                 "SELECT content FROM core_memory WHERE block_name = 'user_profile' AND user_id = ?",
                 (user_id,),
             ).fetchone()
-            lines = [ln for ln in (row[0] or "").split("\n") if ln.strip()]
-            # 矛盾清洗：新权威事实剔除已有矛盾行
+            # Issue #4: 防御性编程——非 default 用户首次写入时 row 为 None，row[0] 会抛 TypeError。
+            # 虽然外层有 try/except 兜底，但会产生无意义 warning 日志，影响日志纯净度。
+            lines = [ln for ln in (row[0] if row else "").split("\n") if ln.strip()]
+            # Domain-specific 业务防御：矛盾清洗针对特定人物（洋芋）在特定时期的性别认知漂移
+            # 所设立的"领域专属事实墓碑"，属于极其收敛的业务防御，并非通用的 NLP 矛盾推断。
+            # 新增矛盾对需手动扩展规则或引入通用 NLI（但 NLI 过重且易误杀，故维持现状）。
             for txt in new_items:
                 if "洋芋是男" in txt:
                     lines = [ln for ln in lines if "洋芋是女" not in ln]
@@ -407,10 +411,17 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
                 added += 1
             if not added:
                 return False
-            # 安全行截断：按整行向前淘汰，绝不切断中间
-            while lines and len("\n".join(lines)) > 500:
-                lines.pop(0)
-            merged = "\n".join(lines)
+            # Issue #6: 优化截断循环 O(n²) 复杂度——采用逆序累加预计算。
+            # 原实现每次迭代重新 "\n".join(lines)，是 O(n²)。虽然 user_profile 行数 < 30，
+            # 实际性能无影响，但逆序累加更优雅规范，且在大行数场景下性能更好。
+            total_len = 0
+            kept = []
+            for ln in reversed(lines):  # 从最新往最旧遍历，保留最新
+                if total_len + len(ln) + 1 > 500:  # +1 for newline
+                    break
+                kept.insert(0, ln)
+                total_len += len(ln) + 1
+            merged = "\n".join(kept)
             cur.execute(
                 "INSERT OR REPLACE INTO core_memory (block_name, user_id, content, updated_at) "
                 "VALUES ('user_profile', ?, ?, datetime('now','localtime'))",
@@ -464,6 +475,8 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     if not facts:
         if llm_failed:
             log.warning(f"Memory extraction failed, storing degraded fallback. reason={llm_fail_reason}")
+            # Issue #1: raw_fallback 写入时赋予 7 天生命周期，避免无限积累污染库
+            expires_at = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
             # 标记为 raw_fallback 留存，绝不静默丢失
             facts.append({
                 "fact": text.strip()[:500],
@@ -471,6 +484,7 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
                 "lane": "procedural",
                 "importance": 0.4,
                 "source": f"{source}_degraded",
+                "expires_at": expires_at,
             })
         else:
             log.info(f"LLM returned 0 facts, text rejected. len={len(text.strip())}")
@@ -567,10 +581,10 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
             if imp is not None and imp < 0.7 and len(_content) < 20 and not _has_concrete:
                 imp = 0.3
             cur.execute(
-                """INSERT INTO memories (user_id, category, content, lane, importance, source, origin)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO memories (user_id, category, content, lane, importance, source, origin, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (user_id, fact.get("category", "general"), fact["fact"],
-                 lane, imp, fact.get("source", source), fact_origin)
+                 lane, imp, fact.get("source", source), fact_origin, fact.get("expires_at"))
             )
             mem_id = cur.lastrowid
             stored.append({"id": mem_id, "content": fact["fact"], "lane": lane})

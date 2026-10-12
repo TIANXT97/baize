@@ -167,6 +167,69 @@ class AutoDream:
         except (TypeError, ValueError):
             return None
 
+    def _cleanup_expired_fallbacks(self, user_id: str = "default") -> int:
+        """Issue #1: 周期巡检清理过期 raw_fallback 降级事实。
+
+        物理删除 source LIKE '%_degraded' 且已过期的降级事实，避免无限积累污染库。
+        同步清理对应的向量（float + int8）。
+        """
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30.0)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            cur = conn.cursor()
+
+            # 找出过期的 raw_fallback 事实
+            cur.execute(
+                """SELECT id FROM memories
+                   WHERE user_id = ? AND source LIKE '%_degraded'
+                     AND expires_at IS NOT NULL AND expires_at < datetime('now', 'localtime')""",
+                (user_id,)
+            )
+            expired_ids = [row[0] for row in cur.fetchall()]
+
+            if not expired_ids:
+                conn.close()
+                return 0
+
+            # 清理向量（float + int8）
+            try:
+                # memory_vec 是 vec0 虚拟表，需加载扩展才能 DELETE
+                try:
+                    import sqlite_vec
+                    conn.enable_load_extension(True)
+                    sqlite_vec.load(conn)
+                except ImportError:
+                    log.warning("AutoDream: sqlite_vec not available, skipping vector cleanup")
+
+                for mid in expired_ids:
+                    try:
+                        cur.execute("DELETE FROM memory_vec WHERE rowid = ?", (mid,))
+                    except Exception:
+                        pass  # vec 可能不存在，静默跳过
+                    try:
+                        cur.execute("DELETE FROM memory_vec_i8 WHERE mem_id = ?", (mid,))
+                    except Exception:
+                        pass
+            except Exception as e:
+                log.warning(f"AutoDream: vector cleanup for expired fallbacks failed: {e}")
+
+            # 物理删除降级事实
+            ph = ",".join("?" * len(expired_ids))
+            cur.execute(
+                f"DELETE FROM memories WHERE id IN ({ph}) AND user_id = ?",
+                expired_ids + [user_id]
+            )
+            deleted = cur.rowcount
+            conn.commit()
+            conn.close()
+
+            if deleted > 0:
+                log.info(f"AutoDream: cleaned up {deleted} expired fallback facts")
+            return deleted
+        except Exception as e:
+            log.warning(f"AutoDream: fallback cleanup failed: {e}")
+            return 0
+
     # ── rule engine dedup ──────────────────────────────────────────────────
 
     def _rule_engine_dedup(self, memories: List[Dict], user_id: str = "default") -> Dict:
@@ -239,6 +302,9 @@ class AutoDream:
         D3: 只处理 user_id 的记忆（_get_recent_memories 按 user_id 过滤，
         写入前 _mark_superseded / _update_content / _store_candidates 校验归属）。
         """
+        # Issue #1: 周期巡检清理过期 raw_fallback 降级事实，避免无限积累污染库
+        self._cleanup_expired_fallbacks(user_id)
+
         memories = self._get_recent_memories(days, user_id)
         if not memories:
             return {"status": "no_memories", "processed": 0}

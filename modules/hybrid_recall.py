@@ -400,10 +400,16 @@ class HybridRecall:
                 conn.close()
             seat_new = [row for row in recent_rows if row["id"] not in results]
             seat_map = self._seat_scores(query, [r["id"] for r in seat_new])
+            # Issue #2: 防抖硬门槛——当 sim < 0.15 时不补入候选集。
+            # 根治短 query（如"那个"、"我想想"）下 Recent Pool 席位补入条目
+            # 因基线得分微弱上浮而挤掉真相关老事实的边界扰动。
+            MIN_SEAT_SIMILARITY = 0.15
             for row in seat_new:
                 rid = row["id"]
                 row_dict = dict(row)
                 sim = seat_map.get(rid, 0.0)
+                if sim < MIN_SEAT_SIMILARITY:
+                    continue  # 防抖：低于阈值不补入
                 results[rid] = {
                     **row_dict,
                     "relevance": round(sim, 3),

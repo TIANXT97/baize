@@ -262,18 +262,35 @@ class BaiZeProvider(MemoryProvider):
         
         # Question 2: Will it conflict with existing memories?
         # Check baize for similar content (async, non-blocking)
+        # Issue #3: 超时收缩至 2s + 坚决 Fail-open，避免主对话流被同步 search 阻塞。
+        # 目前依赖内网极低延迟掩盖该问题，但跨机抖动时 5s 等待不可接受。
         if content_type in ["preference", "lesson"]:
             try:
-                # Quick search for duplicates
-                results = self._search(content[:50], limit=3)
+                # Quick search for duplicates (2s 超时，Fail-open 放行)
+                payload = {
+                    "query": content[:50],
+                    "user_id": self._user_id,
+                    "limit": 3,
+                }
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{self._base_url}/search",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = urllib.request.urlopen(req, timeout=2.0)  # 2s 超时
+                result = json.loads(resp.read())
+                results = result.get("results", [])
                 if results:
                     # Check if any result is very similar (score > 0.9)
                     for r in results:
                         if r.get("score", 0) > 0.9:
                             logger.debug("Gate: duplicate found, skipping")
                             return False
-            except Exception:
-                pass  # If search fails, allow write
+            except Exception as e:
+                # Fail-open: 超时/网络错误一律放行，确保对话丝滑无阻塞
+                logger.debug("Gate search failed (fail-open): %s", e)
+                pass
         
         # Question 3: Can it be compressed to 50 chars?
         # If content is already short, it passes
