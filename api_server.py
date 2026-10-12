@@ -160,6 +160,15 @@ def init_db():
             "ALTER TABLE memories ADD COLUMN origin TEXT DEFAULT 'unknown'"
         )
         log.info("Migration: added memories.origin column")
+    # Issue #1 审核后修复：幂等迁移——memories 表加 expires_at 字段。
+    # 旧库 CREATE TABLE 不会重跑，老库缺此列时 INSERT ... expires_at 会报
+    # 'no such column'。照 confirm_count/origin 的幂等样板补齐（TEXT 存 'YYYY-MM-DD HH:MM:SS'，
+    # 与 created_at 同格式；NULL = 永久不过期，供非降级事实使用）。
+    if "expires_at" not in cols:
+        cur.execute(
+            "ALTER TABLE memories ADD COLUMN expires_at TEXT DEFAULT NULL"
+        )
+        log.info("Migration: added memories.expires_at column")
     # Reform: 被否决事实墓碑表（rejected_values）
     cur.execute("""
         CREATE TABLE IF NOT EXISTS rejected_values (
@@ -411,17 +420,18 @@ def _sync_core_memory_from_facts(facts, lane, user_id="default"):
                 added += 1
             if not added:
                 return False
-            # Issue #6: 优化截断循环 O(n²) 复杂度——采用逆序累加预计算。
-            # 原实现每次迭代重新 "\n".join(lines)，是 O(n²)。虽然 user_profile 行数 < 30，
-            # 实际性能无影响，但逆序累加更优雅规范，且在大行数场景下性能更好。
+            # Issue #6: 截断真 O(n) —— 先 append 收集保留行，最后一次性 reversed 还原顺序，
+            # 替代 kept.insert(0, ln)（每次插入 O(n)，整体退化为 O(n²)）。
+            # 边界语义与旧版保持 ≤500：对最后一行不计换行符，逐行累加 内容+换行(-1 行不计)。
+            kept_rev = []
             total_len = 0
-            kept = []
             for ln in reversed(lines):  # 从最新往最旧遍历，保留最新
-                if total_len + len(ln) + 1 > 500:  # +1 for newline
+                add = len(ln) if not kept_rev else len(ln) + 1  # 首行(最新)无换行
+                if total_len + add > 500:
                     break
-                kept.insert(0, ln)
-                total_len += len(ln) + 1
-            merged = "\n".join(kept)
+                kept_rev.append(ln)
+                total_len += add
+            merged = "\n".join(reversed(kept_rev))
             cur.execute(
                 "INSERT OR REPLACE INTO core_memory (block_name, user_id, content, updated_at) "
                 "VALUES ('user_profile', ?, ?, datetime('now','localtime'))",

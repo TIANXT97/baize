@@ -171,7 +171,8 @@ class AutoDream:
         """Issue #1: 周期巡检清理过期 raw_fallback 降级事实。
 
         物理删除 source LIKE '%_degraded' 且已过期的降级事实，避免无限积累污染库。
-        同步清理对应的向量（float + int8）。
+        同步清理对应的向量（float + int8），以及孤儿引用（演化边 / 状态 / 合并建议），
+        照 delete_fact 的既有清理链对齐，不留指向已删 id 的悬空引用。
         """
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
@@ -190,6 +191,8 @@ class AutoDream:
             if not expired_ids:
                 conn.close()
                 return 0
+
+            ph = ",".join("?" * len(expired_ids))
 
             # 清理向量（float + int8）
             try:
@@ -213,8 +216,28 @@ class AutoDream:
             except Exception as e:
                 log.warning(f"AutoDream: vector cleanup for expired fallbacks failed: {e}")
 
+            # Issue #1 审核后修复：清理孤儿引用（照 delete_fact 既有清理链对齐），
+            # 防止核心记忆/演化边/合并建议/状态指向已被物理删除的 memory id。
+            try:
+                # 清理演化关系表中涉及已删记忆的边
+                cur.execute(
+                    f"DELETE FROM knowledge_evolution WHERE source_id IN ({ph}) OR target_id IN ({ph})",
+                    expired_ids + expired_ids
+                )
+                # 清理状态表中已删记忆的状态记录
+                cur.execute(
+                    f"DELETE FROM memory_states WHERE memory_id IN ({ph})",
+                    expired_ids
+                )
+                # 清理合并建议中涉及已删记忆的条目
+                cur.execute(
+                    f"DELETE FROM merge_suggestions WHERE keep_id IN ({ph}) OR other_id IN ({ph})",
+                    expired_ids + expired_ids
+                )
+            except Exception as e:
+                log.warning(f"AutoDream: orphan reference cleanup failed: {e}")
+
             # 物理删除降级事实
-            ph = ",".join("?" * len(expired_ids))
             cur.execute(
                 f"DELETE FROM memories WHERE id IN ({ph}) AND user_id = ?",
                 expired_ids + [user_id]

@@ -46,6 +46,10 @@ VEC_WEIGHT = 0.5
 FTS_WEIGHT = 0.3
 GRAPH_WEIGHT = 0.2
 
+# Issue #2: Recent Pool 防抖硬门槛 —— 低于此余弦相似度的席位条目不补入候选集，
+# 根治短 query（如"那个"）下 Recent Pool 席位挤掉真相关老事实的边界扰动。
+MIN_SEAT_SIMILARITY = 0.15
+
 
 # Qwen 3.8 Max 亲笔生成的加固函数：多路归一化与安全得分截断
 def _safe_score(val):
@@ -400,10 +404,7 @@ class HybridRecall:
                 conn.close()
             seat_new = [row for row in recent_rows if row["id"] not in results]
             seat_map = self._seat_scores(query, [r["id"] for r in seat_new])
-            # Issue #2: 防抖硬门槛——当 sim < 0.15 时不补入候选集。
-            # 根治短 query（如"那个"、"我想想"）下 Recent Pool 席位补入条目
-            # 因基线得分微弱上浮而挤掉真相关老事实的边界扰动。
-            MIN_SEAT_SIMILARITY = 0.15
+            # Issue #2: 防抖硬门槛——当 sim < MIN_SEAT_SIMILARITY（模块级常量）时不补入候选集。
             for row in seat_new:
                 rid = row["id"]
                 row_dict = dict(row)
