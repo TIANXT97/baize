@@ -17,13 +17,13 @@ class SystemOneDualGateTest(unittest.TestCase):
             "threshold": 0.25,
             "search_threshold": 0.35,
             "timeout_sec": 1.5,
-            "backup_gate": {
+        }
+        self.backup_config = {
                 "enabled": True,
                 "api_key": "mock_backup_key",
                 "api_url": "https://console.mock-backup.ai/v1/systemone",
                 "model": "drex-v2.0",
-                "timeout_sec": 1.5,
-            },
+            "timeout_sec": 1.5,
         }
 
     @patch.object(JevGate, "_call_systemone_api")
@@ -34,7 +34,7 @@ class SystemOneDualGateTest(unittest.TestCase):
                 "category": {"choice": "ephemeral"},
             }
         }
-        gate = JevGate(self.config)
+        gate = JevGate(self.config, self.backup_config)
         filtered, reason = gate.should_filter("今天中午在公司食堂吃了个牛肉面")
 
         self.assertTrue(filtered)
@@ -54,7 +54,7 @@ class SystemOneDualGateTest(unittest.TestCase):
                 }
             },
         ]
-        gate = JevGate(self.config)
+        gate = JevGate(self.config, self.backup_config)
         filtered, reason = gate.should_filter("今天中午在公司食堂吃了个牛肉面")
 
         self.assertTrue(filtered)
@@ -70,13 +70,43 @@ class SystemOneDualGateTest(unittest.TestCase):
             RuntimeError("Primary timeout"),
             RuntimeError("Backup timeout"),
         ]
-        gate = JevGate(self.config)
+        gate = JevGate(self.config, self.backup_config)
         filtered, reason = gate.should_filter("重要事实：老板的出生年份是1996年")
 
         # 铁律：Fail-open 放行，严禁拦截
         self.assertFalse(filtered)
         self.assertEqual(reason, "gate_all_failed_fail_open")
 
+    @patch.object(JevGate, "_call_systemone_api")
+    def test_empty_answers_triggers_backup(self, mock_api):
+        mock_api.side_effect = [
+            {"answers": {}},
+            {
+                "answers": {
+                    "should_memorize": {"noul": 0.04},
+                    "category": {"choice": "ephemeral"},
+                }
+            },
+        ]
+        gate = JevGate(self.config, self.backup_config)
+        filtered, reason = gate.should_filter("今天中午在公司食堂吃了个牛肉面")
+
+        self.assertTrue(filtered)
+        self.assertIn("drex-v2.0_backup", reason)
+        self.assertEqual(mock_api.call_count, 2)
+
+    @patch.object(JevGate, "_call_systemone_api")
+    def test_search_gate_empty_answers_triggers_backup(self, mock_api):
+        mock_api.side_effect = [
+            {"answers": {}},
+            {"answers": {"needs_memory": {"noul": 0.9}}},
+        ]
+        gate = JevGate(self.config, self.backup_config)
+        needed, reason = gate.needs_memory_search("我的 NAS 地址是多少")
+
+        self.assertTrue(needed)
+        self.assertIn("drex-v2.0_backup", reason)
+        self.assertEqual(mock_api.call_count, 2)
 
 if __name__ == "__main__":
     unittest.main()
