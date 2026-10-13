@@ -2,6 +2,15 @@
 
 ## 编年总表（Architecture Changelog）
 
+### 【v1.5.3-gate · 双子星门控】 2026-10-13(Issue #10 / #11)
+- **核心改造**:
+  1. **[双子星主备门控 · PR #10]**:`jev_gate.py` 主门控 OpenJev 0.1(26B),备用门控 Drex v2.0(3B MoE)热备接管;母语级中英对齐提示词。
+  2. **[备用门控触发边界 · Issue #11]**:主门控超时、HTTP 异常或返回无有效 `answers` 时,`_query_gate` 统一切入备用门控。
+  3. **[配置副作用消除 · Issue #11]**:`backup_config` 改为 `JevGate` 构造函数参数,`api_server.py` 不再就地改写 `_jev_cfg`。
+  4. **[Laya 链路同构 · Issue #11]**:Laya 兜底补齐代理 `self._opener` 与统一 `User-Agent`,防 Cloudflare 1010 拦截。
+
+---
+
 ### 【v1.5.3-hotfix · 天禄·金汤·淬炼】 2026-10-12（生产边界打磨版）
 - **核心代号**：天禄·金汤·淬炼（淬火成钢，边界无瑕）
 - **动刀背景**：工位全代码走查发现 5 处 P2/P3 级边界隐患，经 GitHub issue 审评批准（#1-#6），一次性修复落地。

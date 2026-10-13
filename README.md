@@ -28,7 +28,7 @@
 
 ## ✨ 核心特性 (Key Features)
 
-- 🚪 **双端 System One 智能门控 (Jev Ingest & Search Dual-Gate · v1.5.3 新增)**：
+- 🚪 **双端 System One 智能门控 (Jev Ingest & Search Dual-Gate · v1.5.3 新增 · Issue #11 起主备双门控)**:主门控 OpenJev 0.1(26B),异常或返回无效 `answers` 时自动切入备用 Drex v2.0(3B MoE)热备;
   - **写入端闲聊快筛 (Ingest Gate)**：引入 TypeSafe Jev 轻量判别模型，毫秒级拦截无价值闲聊与瞬态过渡语（`noul < 0.25`），跳过昂贵的大模型提取链，节省 70% Token 消耗并杜绝知识库水化；
   - **召回端智能门神 (Search Gate)**：告别死板正则，主用 Jev 语义意图识别 + Laya HF 在线 Space 兜底，配合显式口令 0ms 白名单直通与 Fail-open 容灾，实现“该想时心领神会，不该想时绝不添乱”。
 - 🛡️ **四道认知防御铁壁 (Cognitive Defense & Tombstone)**：

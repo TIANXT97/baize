@@ -60,9 +60,9 @@
 
 ### 2.2 双端智能门控体系（Jev Gate & Memory Gate）
 - **写入端前置快筛（Ingest Fast Filter）**：
-  - 调用 Jev `systemone` 判别模型，评估文本长期记忆价值（`threshold=0.25`）。判定为 `ephemeral` 闲聊直接返回空，削减 70% Token 消耗。WAL 重放路径强制绕过门控。
+  - 调用主门控 OpenJev 0.1(26B)判别文本长期记忆价值(`threshold=0.25`);主门控超时、HTTP 异常或返回无有效 `answers` 时,自动切入备用门控 Drex v2.0(3B MoE)热备接管。判定为 `ephemeral` 闲聊直接返回空,削减 70% Token 消耗。WAL 重放路径强制绕过门控。
 - **召回端智能门神（Search Smart Gate）**：
-  - 纠正信号与显式口令 0ms 白名单直通；Jev 语义意图判定（`search_threshold=0.35`）；HF Laya 弹性兜底与正则 Fail-open 容灾。
+  - 纠正信号与显式口令 0ms 白名单直通;主/备门控语义意图判定(`search_threshold=0.35`);主备均失效后走 HF Laya 兜底(携带代理与统一 User-Agent),最终正则 Fail-open 容灾。
 
 ### 2.3 四道认知防线（Cognitive Defense）
 - **Origin 身份硬隔离**：非用户亲陈事实物理禁止同步进 `user_profile`；
