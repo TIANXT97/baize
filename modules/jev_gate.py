@@ -19,7 +19,7 @@ class JevGate:
     v1.5.2: 新增 needs_memory_search() — 召回端智能门控（Jev 主用 + Laya HF 兜底）。
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, backup_config: dict | None = None):
         self.enabled = bool(config.get("enabled", False))
         self.api_key = config.get("api_key", "")
         self.api_url = config.get("api_url", "https://api.typesafe.ai/v1/systemone")
@@ -31,7 +31,7 @@ class JevGate:
         self.fallback_laya_url = config.get("fallback_laya_url", "").strip()
 
         # Backup Gate 支持 (例如 Drex v2.0 作为静默热备)
-        backup_cfg = config.get("backup_gate") or {}
+        backup_cfg = backup_config or {}
         self.backup_enabled = bool(backup_cfg.get("enabled", False))
         self.backup_api_key = backup_cfg.get("api_key", "")
         self.backup_api_url = backup_cfg.get("api_url", "")
@@ -67,6 +67,23 @@ class JevGate:
         with resp:
             raw_bytes = resp.read(10 * 1024 * 1024)
         return json.loads(raw_bytes.decode("utf-8", "replace"))
+
+    def _query_gate(self, payload: dict) -> tuple:
+        attempts = [(self.api_url, self.api_key, self.model, self.timeout_sec, self.model)]
+        if self.backup_enabled and self.backup_api_url and self.backup_api_key:
+            attempts.append((self.backup_api_url, self.backup_api_key, self.backup_model,
+                             self.backup_timeout, f"{self.backup_model}_backup"))
+        for url, key, model, timeout, label in attempts:
+            try:
+                body = self._call_systemone_api(url, key, model, timeout, dict(payload))
+            except Exception as e:
+                log.warning(f"Gate ({label}) failed: {e}")
+                continue
+            answers = body.get("answers") if isinstance(body, dict) else None
+            if isinstance(answers, dict) and answers:
+                return answers, label
+            log.warning(f"Gate ({label}) returned no valid answers")
+        return None, ""
 
     def should_filter(self, text: str) -> tuple:
         """判定文本是否应被过滤。
@@ -134,31 +151,11 @@ class JevGate:
             "state": text,
         }
 
-        # 1. 尝试主门控 (OpenJev 26B)
-        body = None
-        source_label = self.model
-        try:
-            body = self._call_systemone_api(
-                self.api_url, self.api_key, self.model, self.timeout_sec, payload
-            )
-        except Exception as e:
-            log.warning(f"Primary gate ({self.model}) failed: {e}")
-            # 2. 主门控失败，尝试备用门控 (Drex v2.0 热备)
-            if self.backup_enabled and self.backup_api_url and self.backup_api_key:
-                try:
-                    log.info(f"Falling back to backup gate ({self.backup_model})...")
-                    body = self._call_systemone_api(
-                        self.backup_api_url, self.backup_api_key, self.backup_model, self.backup_timeout, payload
-                    )
-                    source_label = f"{self.backup_model}_backup"
-                except Exception as be:
-                    log.warning(f"Backup gate ({self.backup_model}) also failed: {be}")
-
-        if not body:
+        answers, source_label = self._query_gate(payload)
+        if answers is None:
             return (False, "gate_all_failed_fail_open")
 
         try:
-            answers = body.get("answers", {})
             noul = float(answers.get("should_memorize", {}).get("noul", 1.0))
             category = str(answers.get("category", {}).get("choice", "unknown"))
 
@@ -194,30 +191,11 @@ class JevGate:
             "state": query,
         }
 
-        body = None
-        source_label = self.model
-        try:
-            body = self._call_systemone_api(
-                self.api_url, self.api_key, self.model, self.timeout_sec, payload
-            )
-        except Exception as e:
-            log.warning(f"Primary search gate ({self.model}) failed: {e}")
-            if self.backup_enabled and self.backup_api_url and self.backup_api_key:
-                try:
-                    log.info(f"Falling back to backup search gate ({self.backup_model})...")
-                    body = self._call_systemone_api(
-                        self.backup_api_url, self.backup_api_key, self.backup_model, self.backup_timeout, payload
-                    )
-                    source_label = f"{self.backup_model}_backup"
-                except Exception as be:
-                    log.warning(f"Backup search gate ({self.backup_model}) also failed: {be}")
-
-        if not body:
-            log.warning("All primary/backup SystemOne search gates failed, trying Laya fallback")
+        answers, source_label = self._query_gate(payload)
+        if answers is None:
             return self._call_laya_fallback(query)
 
         try:
-            answers = body.get("answers", {})
             noul = float(answers.get("needs_memory", {}).get("noul", 0.0))
 
             if noul >= self.search_threshold:
@@ -243,10 +221,10 @@ class JevGate:
             req = urllib.request.Request(
                 self.fallback_laya_url,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "User-Agent": "Baize/Gate-v2.0 (TypeSafe-Client)"},
                 method="POST",
             )
-            resp = urllib.request.urlopen(req, timeout=self.timeout_sec)
+            resp = self._opener.open(req, timeout=self.timeout_sec) if self._opener else urllib.request.urlopen(req, timeout=self.timeout_sec)
             event_body = json.loads(resp.read().decode("utf-8"))
             event_id = event_body.get("event_id", "")
             if not event_id:
@@ -255,8 +233,8 @@ class JevGate:
 
             # Step 2: GET SSE 轮询结果
             sse_url = f"{self.fallback_laya_url}/{event_id}"
-            sse_req = urllib.request.Request(sse_url, method="GET")
-            sse_resp = urllib.request.urlopen(sse_req, timeout=self.timeout_sec + 1)
+            sse_req = urllib.request.Request(sse_url, headers={"User-Agent": "Baize/Gate-v2.0 (TypeSafe-Client)"}, method="GET")
+            sse_resp = self._opener.open(sse_req, timeout=self.timeout_sec + 1) if self._opener else urllib.request.urlopen(sse_req, timeout=self.timeout_sec + 1)
             sse_text = sse_resp.read().decode("utf-8")
 
             # 解析 SSE data 行
