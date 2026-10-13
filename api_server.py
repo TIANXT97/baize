@@ -303,6 +303,8 @@ coalesce = CoalesceManager(flush_callback=on_wave_flush)
 
 # ===== Jev Gate (旁路记忆门控) =====
 _jev_cfg = config.get("jev_gate", {})
+if _jev_cfg and "backup_gate" in config:
+    _jev_cfg["backup_gate"] = config.get("backup_gate")
 jev_gate = JevGate(_jev_cfg) if _jev_cfg.get("enabled") else None
 if jev_gate:
     log.info(f"JevGate enabled: model={jev_gate.model}, threshold={jev_gate.threshold}, search_threshold={jev_gate.search_threshold}")
