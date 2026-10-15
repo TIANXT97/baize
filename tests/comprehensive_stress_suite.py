@@ -36,7 +36,7 @@ def test_1_health_and_baseline():
     req = urllib.request.urlopen(f"{API_BASE}/health", timeout=5)
     body = json.loads(req.read().decode())
     assert body["status"] == "ok", f"Health status not ok: {body}"
-    assert body["version"] == "1.5.2-baize", f"Version mismatch: {body['version']}"
+    assert body["version"] == "1.6.0-baize", f"Version mismatch: {body['version']}"
     assert all(body["modules"].values()), f"Some modules not healthy: {body['modules']}"
     assert not body["degraded"], f"Probes degraded: {body['degraded']}"
     
