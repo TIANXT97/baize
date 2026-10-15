@@ -129,21 +129,10 @@ class HybridRecall:
         self._init_vec()
 
     def _init_vec(self):
-        """Initialize sqlite-vec virtual table + int8 量化表 if available."""
-        if not HAS_VEC:
-            return
+        """int8 量化表与 sqlite-vec float 虚表分别初始化;int8 表不依赖 sqlite-vec 扩展。"""
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout = 30000")
-            conn.execute("PRAGMA cache_size = -1000")
-            conn.execute("PRAGMA mmap_size = 0")
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-            conn.execute(f"""
-                CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec
-                USING vec0(embedding float[{EMBED_DIM}])
-            """)
-            # P1-1: int8 量化表（numpy 余弦检索，4x 存储压缩）
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memory_vec_i8 (
                     mem_id INTEGER PRIMARY KEY,
@@ -157,7 +146,25 @@ class HybridRecall:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_vec_i8_model ON memory_vec_i8(model_space)")
             conn.commit()
             conn.close()
-            log.info("sqlite-vec initialized (float + int8 tables)")
+        except Exception as e:
+            log.warning(f"int8 vector table init failed: {e}")
+
+        if not HAS_VEC:
+            return
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30.0)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA cache_size = -1000")
+            conn.execute("PRAGMA mmap_size = 0")
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec
+                USING vec0(embedding float[{EMBED_DIM}])
+            """)
+            conn.commit()
+            conn.close()
+            log.info("sqlite-vec initialized (float table)")
         except Exception as e:
             log.warning(f"sqlite-vec init failed: {e}")
 
