@@ -218,7 +218,7 @@ def read_key(path, env_name=None):
 def read_dotenv_key(env_name, dotenv_path="/root/.hermes/.env"):
     """从 .env 文件读指定变量（模型与记忆共用同一个上游网关 key 时的正路）。
 
-    2026-09-15：主 LLM 换到 10router 后，钥匙存在 Hermes 的 .env 里，
+    2026-09-15：主 LLM 换到 local gateway 后，钥匙存在 Hermes 的 .env 里，
     不在 baize 的 systemd 环境里 —— 故须支持按变量名从 .env 取值。
     """
     if not env_name:
