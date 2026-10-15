@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Framework-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
-[![Release: v1.5.3](https://img.shields.io/badge/Release-v1.5.3--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
+[![Release: v1.5.3](https://img.shields.io/badge/Release-v1.6.0--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
 [![Platform: Linux/Debian](https://img.shields.io/badge/Platform-Debian%20Native-blue.svg)](#)
 
 </div>
@@ -19,7 +19,7 @@
 
 **白泽（Bai Ze）** 是一套专为长生命周期 AI Agent（如 Hermes Agent 等）设计的**全功能私有化持久思想引擎（Thought Engine）**。
 
-它坚决拒绝传统记忆方案中“无脑向量堆积、断电即丢、检索无序、长上下文费用失控”的痼疾，集成了**分类权重指数时序衰减、知识拓扑演化建边、Jev/Laya 双端前置判别门控、Coalesce 批量防抖聚合、多模型混合检索（FTS5 + Voyage int8 向量 + 图谱多跳）、WAL 预写日志物理落盘与两段式灾备**。
+它坚决拒绝传统记忆方案中“无脑向量堆积、断电即丢、检索无序、长上下文费用失控”的痼疾，集成了**分类权重指数时序衰减、知识拓扑演化建边、双端决策模型门控、Coalesce 批量防抖聚合、多模型混合检索（FTS5 + Voyage int8 向量 + 图谱多跳）、WAL 预写日志物理落盘与两段式灾备**。
 
 > **核心哲学**：  
 > *“记忆不是堆积，而是筛选；遗忘不是缺陷，而是智慧；思想不是存储，而是编织。”*
@@ -29,8 +29,8 @@
 ## ✨ 核心特性 (Key Features)
 
 - 🚪 **双端前置判别门控 (Jev Ingest & Search Dual-Gate · v1.5.3 起主备双门控)**:主门控 OpenJev 0.1(26B),异常或返回无效 `answers` 时自动切入备用 Drex v2.0(3B MoE)热备;
-  - **写入端闲聊快筛 (Ingest Gate)**：引入 TypeSafe Jev 轻量判别模型，毫秒级拦截无价值闲聊与瞬态过渡语（`noul < 0.25`），跳过昂贵的大模型提取链，节省 70% Token 消耗并杜绝知识库水化；
-  - **召回端检索门控 (Search Gate)**:主用 Jev 语义意图识别 + Laya HF 在线 Space 兜底,配合关键词白名单直通(FastPath)与 Fail-open 容灾。
+  - **写入端闲聊快筛 (Ingest Gate)**：毫秒级判别文本长期记忆价值，快速拦截日常口水与过渡闲聊（`noul < 0.25`），跳过昂贵的大模型提取链，节省 70% Token 消耗并杜绝知识库水化；
+  - **召回端检索门控 (Search Gate)**:语义意图识别驱动的主动追忆，配合自定义关键词白名单直通(FastPath)与 Fail-open 容灾。
 - 🛡️ **认知安全与墓碑防御机制 (Cognitive Defense & Tombstone)**：
   - **Origin 身份硬隔离**：解析输入角色打标，非用户亲陈事实在代码层物理剥夺进入 `user_profile` 权限，彻底杜绝大模型推测被洗白为永久画像；
   - **极性反转直接取代**：长句否定纠错直接判定 `replaces`（置信度 0.85），通过主题词覆盖判定极性,避免长句并集稀释；
@@ -52,7 +52,7 @@
 ## 🏗️ 架构拓扑 (Architecture)
 
 <div align="center">
-  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.3 全景架构拓扑" width="100%" />
+  <img src="docs/assets/architecture.svg" alt="白泽 v1.6.0 全景架构拓扑" width="100%" />
 </div>
 
 <details>
@@ -67,12 +67,12 @@
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│               白泽 v1.5.3内核架构 (TianLu Engine)                       │
+│               白泽 v1.6.0 内核架构                       │
 │                                                                        │
 │  ┌──────────────────────┐              ┌────────────────────────────┐  │
 │  │     写入与演化链路   │              │        追忆与检索链路      │  │
 │  │                      │              │                            │  │
-│  │  Jev Ingest 判别门控 │              │  Jev 智能门神 (Laya/白名单)│  │
+│  │  前置写入判别门控 │              │  检索决策门控 (白名单直通)│  │
 │  │  (前置过滤纯闲聊废话)│              │  (口令0ms直通 / Fail-open) │  │
 │  │         │            │              │             │              │  │
 │  │  Origin 角色硬标记   │              │  48h 活跃记忆保底初筛池    │  │
@@ -134,7 +134,7 @@ cp .env.example .env
 # 编辑填入你的 API Key 与 config.json 配置：
 # - 提取器支持主/备双链自动降级（推荐主用 DeepSeek-V4.1-Flash [关闭推理]，备用 GLM-5.3-Flash / Ling-3.0-flash）；
 # - INT8 向量推荐 Voyage AI 200M 终身免费额度；
-# - 可选启用 Jev 门控（填入 typesafe API key 走专线代理，享受毫秒级闲聊拦截与智能意图识别）。
+# - 可选启用决策模型门控（在 config.json 中配置 gate 接口与 key，享受毫秒级闲聊拦截与意图判定）。
 ```
 
 ### 3. 启动服务
@@ -166,8 +166,8 @@ memory:
 
 ## 📚 详细技术文档 (Documentation)
 
-- 📜 [白泽 v1.5.3 完整技术白皮书](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
-- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.3 完整演进历史与历次架构审计结论
+- 📜 [白泽 v1.6.0 架构白皮书](docs/whitepaper.md) — 核心系统架构、决策模型门控、认知安全与存储规范
+- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.6.0 完整演进历史与历次架构审计结论
 
 ---
 
