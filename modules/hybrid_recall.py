@@ -147,9 +147,14 @@ class HybridRecall:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memory_vec_i8 (
                     mem_id INTEGER PRIMARY KEY,
-                    vec BLOB NOT NULL
+                    vec BLOB NOT NULL,
+                    model_space TEXT NOT NULL DEFAULT 'voyage-4-lite'
                 )
             """)
+            i8_cols = [row[1] for row in conn.execute("PRAGMA table_info(memory_vec_i8)").fetchall()]
+            if "model_space" not in i8_cols:
+                conn.execute("ALTER TABLE memory_vec_i8 ADD COLUMN model_space TEXT NOT NULL DEFAULT 'voyage-4-lite'")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_vec_i8_model ON memory_vec_i8(model_space)")
             conn.commit()
             conn.close()
             log.info("sqlite-vec initialized (float + int8 tables)")
@@ -190,6 +195,7 @@ class HybridRecall:
         vector = self._get_embedding(query, input_type="query")
         if not vector:
             return []
+        query_space = self.last_embed_model
         q = np.array(vector, dtype=np.float32)
         q = q / (np.linalg.norm(q) + 1e-9)
         q8 = np.clip(np.round(q * 127), -127, 127).astype(np.int8)
@@ -216,11 +222,12 @@ class HybridRecall:
                    FROM memory_vec_i8 i
                    JOIN memories m ON m.id = i.mem_id
                    WHERE m.user_id = ?
+                     AND i.model_space = ?
                      AND NOT EXISTS (
                          SELECT 1 FROM memory_states s
                          WHERE s.memory_id = m.id AND s.state = 'superseded'
                      )""",
-                (user_id,),
+                (user_id, query_space),
             )
             while True:
                 batch = cur.fetchmany(BATCH)
@@ -848,6 +855,7 @@ class HybridRecall:
         vector = self._get_embedding(text, input_type="document")
         if not vector:
             return False
+        model_space = self.last_embed_model
         conn = None
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
@@ -865,8 +873,8 @@ class HybridRecall:
             )
             # P1-1: 双写 int8 量化向量（numpy 检索用）——同事务，任一失败回滚
             conn.execute(
-                "INSERT OR REPLACE INTO memory_vec_i8(mem_id, vec) VALUES (?, ?)",
-                (mem_id, self._quantize_int8(vector))
+                "INSERT OR REPLACE INTO memory_vec_i8(mem_id, vec, model_space) VALUES (?, ?, ?)",
+                (mem_id, self._quantize_int8(vector), model_space)
             )
             conn.commit()
             return True
@@ -931,9 +939,10 @@ class HybridRecall:
         with self._embed_lock:
             entry = self._embed_cache.get(key)
             if entry:
-                ts, vec = entry
+                ts, vec, model = entry
                 if time.time() - ts < self._embed_cache_ttl:
                     self._embed_cache.move_to_end(key)
+                    self.last_embed_model = model
                     return vec
                 del self._embed_cache[key]
 
@@ -942,9 +951,10 @@ class HybridRecall:
         vec = self._fetch_embedding(text, VOYAGE_URL, VOYAGE_MODEL, self.voyage_key, input_type=voyage_it)
         if vec is not None:
             with self._embed_lock:
-                self._embed_cache[key] = (time.time(), vec)
+                self._embed_cache[key] = (time.time(), vec, VOYAGE_MODEL)
                 while len(self._embed_cache) > self._embed_cache_max:
                     self._embed_cache.popitem(last=False)
+            self.last_embed_model = VOYAGE_MODEL
             return vec
         # 2) bge-m3 兜底（免费白嫖，不挑）
         if self.embed_key and self.embed_key != self.voyage_key:
@@ -952,18 +962,20 @@ class HybridRecall:
             vec = self._fetch_embedding(text, BGE_URL, BGE_MODEL, self.embed_key, input_type=None)
             if vec is not None:
                 with self._embed_lock:
-                    self._embed_cache[key] = (time.time(), vec)
+                    self._embed_cache[key] = (time.time(), vec, BGE_MODEL)
                     while len(self._embed_cache) > self._embed_cache_max:
                         self._embed_cache.popitem(last=False)
+                self.last_embed_model = BGE_MODEL
                 return vec
         elif self.embed_key:
             # voyage_key 与 embed_key 同值时仍尝试一次 bge 路径（URL 不同）
             vec = self._fetch_embedding(text, BGE_URL, BGE_MODEL, self.embed_key, input_type=None)
             if vec is not None:
                 with self._embed_lock:
-                    self._embed_cache[key] = (time.time(), vec)
+                    self._embed_cache[key] = (time.time(), vec, BGE_MODEL)
                     while len(self._embed_cache) > self._embed_cache_max:
                         self._embed_cache.popitem(last=False)
+                self.last_embed_model = BGE_MODEL
                 return vec
         return None
 
