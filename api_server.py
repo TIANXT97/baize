@@ -137,6 +137,33 @@ def init_db():
             llm_save_rate REAL
         );
 
+        CREATE TABLE IF NOT EXISTS memory_states (
+            memory_id INTEGER PRIMARY KEY,
+            state TEXT DEFAULT 'active',
+            reason TEXT,
+            source TEXT,
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_evolution (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER,
+            target_id INTEGER,
+            relation TEXT,
+            confidence REAL,
+            reason TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS merge_suggestions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            keep_id     INTEGER NOT NULL,
+            other_id    INTEGER NOT NULL,
+            similarity  REAL    NOT NULL,
+            reviewed    INTEGER DEFAULT 0,
+            created_at  TEXT    DEFAULT (datetime('now','localtime'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id, id);
         CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_memory_states_state_mem ON memory_states(state, memory_id);
@@ -573,7 +600,7 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
     if not is_replay:
         wal.append("store_facts", {"text": text, "source": source, "user_id": user_id})
     evolution_tasks = []
-    with get_db() as conn:
+    with get_db(write=True) as conn:
         cur = conn.cursor()
         for fact in facts:
             # E1: category 归一化——若在 LANE_CONFIG 中直接用，否则 classify_lane 关键词兜底，再兜底 general
@@ -880,6 +907,16 @@ def memory_health():
         }
     }
 
+def _store_by_origin(segments, source: str, user_id: str):
+    stored = []
+    for origin in ("user", "agent-inferred"):
+        group = [content for o, content in segments if o == origin]
+        if group:
+            stored.extend(_store_extracted_facts("\n".join(group), source=source,
+                                                 user_id=user_id, msg_origin=origin))
+    return stored
+
+
 @app.post("/add")
 def add_memory(req: AddRequest):
     # Parse messages
@@ -890,31 +927,21 @@ def add_memory(req: AddRequest):
     except json.JSONDecodeError:
         msgs = [{"role": "user", "content": req.messages}]
 
-    # Combine message content + Reform: 提取发言角色用于 origin 打标
-    texts = []
-    has_user = False
-    has_assistant = False
+    segments = []
     for m in msgs:
         if isinstance(m, dict):
-            texts.append(m.get("content", ""))
-            r = m.get("role", "user")
-            if r in ("user", "hermes_manual"):
-                has_user = True
-            elif r == "assistant":
-                has_assistant = True
+            content = m.get("content", "")
+            origin = "agent-inferred" if m.get("role") == "assistant" else "user"
         elif isinstance(m, str):
-            texts.append(m)
-            has_user = True
-    combined = "\n".join(t for t in texts if t.strip())
+            content, origin = m, "user"
+        else:
+            continue
+        if content.strip():
+            segments.append((origin, content))
+    combined = "\n".join(content for _, content in segments)
 
     if not combined.strip():
         return {"status": "empty", "memories": []}
-
-    # Reform: 根据消息角色确定 origin：纯助手=agent-inferred，含用户=user
-    if has_assistant and not has_user:
-        msg_origin = "agent-inferred"
-    else:
-        msg_origin = "user"
 
     force_sync = req.metadata.get("force_sync", False)
 
@@ -937,8 +964,7 @@ def add_memory(req: AddRequest):
 
         def do_extract():
             try:
-                stored = _store_extracted_facts(combined, source=req.metadata.get("source", "hermes"),
-                                                user_id=req.user_id, msg_origin=msg_origin)
+                stored = _store_by_origin(segments, req.metadata.get("source", "hermes"), req.user_id)
                 jobs[job_id] = {"status": "done", "memories": stored, "created_at": time.time()}
             except Exception as e:
                 jobs[job_id] = {"status": "error", "error": str(e), "created_at": time.time()}
@@ -947,8 +973,7 @@ def add_memory(req: AddRequest):
         return {"status": "accepted", "action": "async_queued", "job_id": job_id}
 
     # Sync mode
-    stored = _store_extracted_facts(combined, source=req.metadata.get("source", "hermes"),
-                                    user_id=req.user_id, msg_origin=msg_origin)
+    stored = _store_by_origin(segments, req.metadata.get("source", "hermes"), req.user_id)
     return {"status": "ok", "memories": stored}
 
 

@@ -58,6 +58,7 @@ class BaiZeProvider(MemoryProvider):
         # E4: 写入失败本地 spool 队列（后台重试，防静默丢数据）
         self._spool_path = os.path.join(os.environ.get("HERMES_HOME", ""), "baize_spool.jsonl")
         self._spool_interval = 60
+        self._spool_lock = threading.Lock()
         self._spool_thread = threading.Thread(
             target=self._spool_loop, daemon=True, name="baize-spool-flush"
         )
@@ -337,8 +338,9 @@ class BaiZeProvider(MemoryProvider):
         """E4: HTTP 失败/超时数据落盘 spool（JSONL 一行一条），供 _flush_spool 重试。"""
         record = {"ts": time.time(), "messages": messages, "source": source}
         try:
-            with open(self._spool_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            with self._spool_lock:
+                with open(self._spool_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except Exception as e:
             logger.warning("baize spool write failed: %s", e)
 
@@ -358,20 +360,30 @@ class BaiZeProvider(MemoryProvider):
         for ln in lines:
             try:
                 rec = json.loads(ln)
-                self._add_memory(rec.get("messages", []), source=rec.get("source", "hermes"))
-                flushed += 1
+                res = self._add_memory(rec.get("messages", []), source=rec.get("source", "hermes"))
+                if res.get("status") in ("ok", "accepted"):
+                    flushed += 1
+                else:
+                    kept.append(ln)
             except Exception as e:
-                logger.debug("baize spool retry failed, keep line: %s", e)
+                logger.warning("baize spool retry failed, keep line: %s", e)
                 kept.append(ln)
 
         try:
-            if kept:
-                tmp = self._spool_path + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.writelines(kept)
-                os.replace(tmp, self._spool_path)
-            elif os.path.exists(self._spool_path):
-                os.remove(self._spool_path)
+            with self._spool_lock:
+                pending = []
+                if os.path.exists(self._spool_path):
+                    with open(self._spool_path, encoding="utf-8") as f:
+                        pending = [ln for ln in f if ln.strip()]
+                consumed = set(lines)
+                remain = [ln for ln in pending if ln not in consumed] + kept
+                if remain:
+                    tmp = self._spool_path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        f.writelines(remain)
+                    os.replace(tmp, self._spool_path)
+                elif os.path.exists(self._spool_path):
+                    os.remove(self._spool_path)
         except Exception as e:
             logger.warning("baize spool flush write failed: %s", e)
         if flushed:
@@ -523,13 +535,14 @@ class BaiZeProvider(MemoryProvider):
         if not results:
             return ""
         # 稳定排序：同分按 id 升序，顺序跨请求可复现
-        try:
-            results = sorted(
-                results,
-                key=lambda r: (-float(r.get("score", 0) or 0), int(r.get("id", 0) or 0)),
-            )
-        except Exception:
-            pass
+        if not any("rerank_score" in r for r in results):
+            try:
+                results = sorted(
+                    results,
+                    key=lambda r: (-float(r.get("score", 0) or 0), int(r.get("id", 0) or 0)),
+                )
+            except Exception:
+                pass
         lines = ["[baize 相关记忆]"]
         for r in results:
             content = r.get("content", "").strip()

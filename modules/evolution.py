@@ -8,6 +8,13 @@ from typing import List, Dict, Optional, Tuple
 log = logging.getLogger("baize")
 
 # 极性翻转关键词
+RELATION_THRESHOLDS = {
+    "replaces": 0.60,
+    "enriches": 0.50,
+    "confirms": 0.30,
+    "challenges": 0.60,
+}
+
 POLARITY_FLIP = re.compile(r'不再|改为|改成|取代|换成|以前|之前|现在不|已经不|不(再|是|喜欢|想要)')
 
 
@@ -58,7 +65,7 @@ class EvolutionTracker:
 
         for cand in candidates:
             relation, confidence, reason = self._classify_relation(new_fact, cand["content"])
-            if relation and confidence >= 0.6:
+            if relation and confidence >= RELATION_THRESHOLDS.get(relation, 0.60):
                 relationships.append({
                     "source_id": new_id,
                     "target_id": cand["id"],

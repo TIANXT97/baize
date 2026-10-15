@@ -413,21 +413,27 @@ class AutoDream:
                         )
                         continue
                     merged_text = item.get("merged_content", "")
-                    if merged_text and self._update_content(keep_id, merged_text, user_id):
-                        results["distilled"] += 1
-                        results["merged"] += 1
-                        # B4: 记录需重建向量的记忆，由上层（api_server）重建 float+i8 双写
-                        results["rebuilt"].append({"keep_id": keep_id, "content": merged_text})
-                    elif not merged_text:
+                    if not merged_text:
                         log.warning(
                             f"AutoDream: distilled keep_id={keep_id} has empty merged_content, "
-                            f"content update skipped"
+                            f"merge skipped, sources kept active"
                         )
+                        continue
+                    if not self._update_content(keep_id, merged_text, user_id):
+                        log.warning(
+                            f"AutoDream: distilled keep_id={keep_id} content update failed, "
+                            f"merge rolled back, sources kept active"
+                        )
+                        continue
+                    results["distilled"] += 1
+                    results["merged"] += 1
+                    # B4: 记录需重建向量的记忆,由上层(api_server)重建 float+i8 双写
+                    results["rebuilt"].append({"keep_id": keep_id, "content": merged_text})
 
-                    # Mark merged-away memories as superseded
+                    # Write-then-Swap: 新内容落盘后才废弃被合并的旧事实
                     for mid in item.get("merge_ids", []):
                         mid = self._coerce_id(mid)
-                        if mid is None or mid not in batch_ids:
+                        if mid is None or mid not in batch_ids or mid == keep_id:
                             log.warning(
                                 f"AutoDream: merge id {mid!r} not in current batch, dropped"
                             )
