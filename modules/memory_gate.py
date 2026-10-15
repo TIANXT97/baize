@@ -71,14 +71,14 @@ class MemoryGate:
         self.jev_gate = jev_gate
         self._last_memory_time: float = 0
         self._last_needs_memory: bool = False
-        # Qwen 3.8 Max 补丁：包裹非捕获组 + 防空正则恒真 + 异常兜底
+        # Fix: 包裹非捕获组 + 防空正则恒真 + 异常兜底
         self._explicit_search_re = _compile_gate_regex(EXPLICIT_SEARCH_PATTERNS, name="explicit_search")
         self._pass_phrase_re = _compile_gate_regex(GATE_PASS_PHRASES, name="pass_phrase")
         self._trigger_re = _compile_gate_regex(MEMORY_TRIGGERS, name="trigger")
         self._no_memory_re = _compile_gate_regex(NO_MEMORY_PATTERNS, name="no_memory")
 
     def needs_memory(self, message: str, force: Optional[bool] = None) -> bool:
-        # Qwen 3.8 Max 补丁：类型安全防御，防 AttributeError/TypeError 击穿
+        # Fix: 类型安全防御，防 AttributeError/TypeError 击穿
         if message is None:
             msg = ""
         elif isinstance(message, str):

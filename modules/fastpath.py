@@ -19,7 +19,7 @@ FAST_PATTERNS = [
 class FastPath:
     """Extract simple facts without LLM, ~1s response time.
     
-    Qwen 3.8 Max 加固版：输入防爆、支持 group 捕获组提取、保守代词替换防污染。
+    输入防爆、支持 group 捕获组提取、保守代词替换防污染。
     """
 
     def try_extract(self, message: str) -> Optional[Dict]:
@@ -43,7 +43,7 @@ class FastPath:
                 if len(fact) < 2:
                     continue
 
-                # Qwen 3.8 Max 补丁：保守规范化，仅对以“我”开头的句首代词替换，保护“我们/我方”
+                # Fix: 保守规范化，仅对以“我”开头的句首代词替换，保护“我们/我方”
                 if fact.startswith("我的"):
                     fact = "用户的" + fact[2:]
                 elif fact.startswith("我"):

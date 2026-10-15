@@ -152,7 +152,7 @@ class LLMExtractor:
                         "Content-Type": "application/json",
                     },
                 )
-                # Qwen 3.8 Max 亲笔生成的加固调用：限制 5MB，使用上下文安全关闭连接，防 OOM 与连接泄漏
+                # Fix:限制 5MB，使用上下文安全关闭连接，防 OOM 与连接泄漏
                 with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
                     raw_bytes = resp.read(5 * 1024 * 1024)
                 result = json.loads(raw_bytes.decode("utf-8", "replace"))

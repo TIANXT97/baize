@@ -51,7 +51,7 @@ GRAPH_WEIGHT = 0.2
 MIN_SEAT_SIMILARITY = 0.15
 
 
-# Qwen 3.8 Max 亲笔生成的加固函数：多路归一化与安全得分截断
+# Fix:多路归一化与安全得分截断
 def _safe_score(val):
     try:
         if val is None:
@@ -210,7 +210,7 @@ class HybridRecall:
         try:
             # A4: 按 user_id 预过滤，缩小扫描集（memory_vec_i8 无 user_id 列 → JOIN）
             # B6: 排除 superseded 记忆，避免其向量在检索路径长期存活占用 top-k
-            # Qwen 3.8 Max 补丁：使用 NOT EXISTS 拔除 SQL 三值逻辑黑洞（抗 NULL 污染）
+            # Fix: 使用 NOT EXISTS 拔除 SQL 三值逻辑黑洞（抗 NULL 污染）
             cur = conn.execute(
                 """SELECT i.mem_id, i.vec
                    FROM memory_vec_i8 i
@@ -373,7 +373,7 @@ class HybridRecall:
         # 根治"最新决议文本不含查询关键词 → FTS/Vector 初筛即跌出候选集"的缺陷：
         # 最近 48h 内按 importance DESC, id DESC 的前 30 条活跃记忆无条件补入候选集。
         #
-        # 2026-09-23 v4 五人会诊改判：席位=纯准入，保底基准分（importance*0.4）废除。
+        # 2026-09-23 v4 改判：席位=纯准入，保底基准分（importance*0.4）废除。
         # 旧制下补入条目拿 0.36 保底 + 0.25 加法 = 0.61 双计分墙，把相关度 0.808
         # 的细节条压到 38 名（9/23 存根案实测）。现改算与查询的真实余弦相似度
         # （_seat_scores，量纲 sim*VEC_WEIGHT）：真相关的新决议照常上浮（9/18
@@ -476,7 +476,7 @@ class HybridRecall:
             trace["stages"]["graph_expanded"] = len(results) - trace["stages"]["hybrid_merged"]
 
         # 2026-09-17 第一刀：绝对时效加性增益（Additive Recency Prior）——
-        # 2026-09-23 v4 五人会诊（Opus4.6/Gemini3.8/GLM-5.3/KimiK3/K2.8-Preview）
+        # 2026-09-23 v4 多方会诊
         # 全票改判：加法结构破坏相关性单调性，与 recent_pool 保底分构成双计。
         # 废除加法，时效只走单通道乘法：score *= (1 + α)，α≤0.10——
         # 低相关存根凭时效永远翻不过高相关细节条，天然免疫双计；且乘法对
@@ -809,7 +809,7 @@ class HybridRecall:
                 # B6: 排除 superseded 记忆，避免其向量在检索路径长期存活
                 if rowid in superseded:
                     continue
-                # Qwen 3.8 Max 补丁：L2 距离安全单调映射，防止硬编码 2.0 漂移产生截断失真
+                # Fix: L2 距离安全单调映射，防止硬编码 2.0 漂移产生截断失真
                 if distance is None or not math.isfinite(distance):
                     score = 0.0
                 else:
@@ -883,7 +883,7 @@ class HybridRecall:
                 conn.close()
 
     def _seat_scores(self, query: str, seat_ids: List[int]) -> Dict[int, float]:
-        """2026-09-23 v4 会诊补丁：席位条真实语义分（席位=纯准入，零假保底）。
+        """2026-09-23 v4 修正：席位条真实语义分（席位=纯准入，零假保底）。
 
         recent_pool 补入的条目不再享受 importance*0.4 保底分——改算与查询的真实
         余弦相似度（量纲与 vector 路径一致：sim * VEC_WEIGHT）。query 向量走

@@ -481,7 +481,7 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
             llm_fail_reason = str(e)
             log.error(f"LLM extraction error: {e}")
 
-    # Qwen 3.8 Max 补丁：消灭静默丢失！若提取失败或 0 事实，写入可追踪降级事实
+    # Fix: 消灭静默丢失！若提取失败或 0 事实，写入可追踪降级事实
     if not facts:
         if llm_failed:
             log.warning(f"Memory extraction failed, storing degraded fallback. reason={llm_fail_reason}")
@@ -580,9 +580,9 @@ def _store_extracted_facts(text: str, source: str = "hermes", user_id: str = "de
             lane = fact.get("category") if fact.get("category") in decay.LANE_CONFIG else decay.classify_lane(fact["fact"], fact.get("category", "general"))
             # Reform: 强制打标 origin
             fact_origin = msg_origin
-            # 2026-09-23 v4 存根闸（五人会诊共识）：低信息量短句 = 抽取端"实体脱落"
+            # 2026-09-23 v4 存根闸（多方共识）：低信息量短句 = 抽取端"实体脱落"
             # 产物（如"用户有三个账号"），默认降权至 0.3——丧失与带细节的老条
-            # 争夺榜首的资格（Gemini 存根降权 + Opus 最小信息量门槛）。判定两条：
+            # 争夺榜首的资格（Gemini 存根降权 + 最小信息量门槛）。判定两条：
             # ① 显式重要度未超 0.7（尊重上游对 identity/rule 的显式加权）；
             # ② 长度 < 20 字符且不含具体实体串（英文/编号/路径/时间等）。
             imp = fact.get("importance", 0.5)
