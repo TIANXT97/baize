@@ -73,7 +73,7 @@
     "threshold": 0.25,
     "search_threshold": 0.35,
     "timeout_sec": 1.5,
-    "proxy": "http://127.0.0.1:7890"
+    "proxy": "http://127.0.0.1:YOUR_PROXY_PORT"
   },
   "backup_gate": {
     "enabled": true,

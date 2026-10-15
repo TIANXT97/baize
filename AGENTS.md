@@ -1,6 +1,6 @@
 # AGENTS.md —— 白泽项目 AI Agent 工作指南
 
-> 本文件为 AI agent（Claude / GPT / Qwen / 其他模型）提供项目上下文与工作规范。
+> 本文件为 AI agent（Claude / GPT / 其他模型）提供项目上下文与工作规范。
 > 跨会话、跨模型生效，确保代码审核与后续开发的一致性。
 
 ---
@@ -28,7 +28,7 @@ baize-memory/
 │   ├── jev_gate.py        # Jev/Laya 双端智能门控
 │   ├── wal.py             # WAL 预写日志 + os.fsync() 物理落盘
 │   ├── decay.py           # 9 轨道艾宾浩斯遗忘衰减
-│   ├── coalesce.py        # 潮浪波次防抖聚合
+│   ├── coalesce.py        # 批量防抖聚合 (Coalesce)
 │   ├── memory_gate.py     # 召回端门控（口令/纠正信号白名单）
 │   ├── core_memory.py     # 核心记忆块管理
 │   ├── reranker.py        # Voyage/bge 双引擎重排
@@ -83,7 +83,7 @@ baize-memory/
 ### 4.1 注释规范
 
 **必须包含**：
-- **修复历史**：标注修复日期、会诊记录、实测数据（如 `// 2026-09-23 v4 五人会诊共识`）
+- **修复历史**:标注修复日期、设计决议记录、实测数据(如 `// 2026-09-23 v4 多方共识`)
 - **版本标记**：新特性标注版本号（如 `// v1.5.3-hotfix`）
 - **Issue 引用**：修复 issue 时标注 issue 号（如 `// Issue #1`）
 - **业务背景**：Domain-specific 防御标注业务原因（如 `// Domain-specific 业务防御：矛盾清洗针对特定人物...`）
@@ -243,7 +243,7 @@ curl -X POST http://127.0.0.1:8767/search_trace \
 
 ## 10. 相关文档
 
-- 📜 [白泽 v1.5.3 完整技术白皮书（天禄·天眼现役版）](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
+- 📜 [白泽 v1.6.0 架构白皮书](docs/whitepaper.md) — 核心系统架构、Jev/Laya 前置判别门控、认知安全与存储规范
 - 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.3 完整演进历史与历次架构审计结论
 - 📜 [机器级 SOP（工位）](E:\AI工具\claude-run\CLAUDE.md) — 三节点分工、SSH/Git/部署规范（仅工位机器生效）
 
