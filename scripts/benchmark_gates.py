@@ -137,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("--url", default="https://api.codiv.ai/v1/systemone", help="API 端点")
     parser.add_argument("--key", default=os.getenv("CODIV_API_KEY", "sk-codiv-7R3oc00a6RylyqaEZgYVoJqYPRPw6puv1i9CYujD"), help="API 密钥")
     parser.add_argument("--model", default="openjev-latest", help="模型名称")
-    parser.add_argument("--proxy", default="http://192.168.31.235:7890", help="HTTP 代理")
+    parser.add_argument("--proxy", default="", help="HTTP 代理(可选,如 http://127.0.0.1:YOUR_PROXY_PORT)")
     args = parser.parse_args()
 
     run_benchmark(args.url, args.key, args.model, args.proxy)

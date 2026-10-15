@@ -1,0 +1,39 @@
+{
+  "port": 8767,
+  "llm_api_url": "https://api.example-gateway.com/v1",
+  "llm_model": "your-extractor-model",
+  "llm_key_env": "BAIZE_LLM_KEY  # 或任意 .env 变量名;主链挂掉自动降级 fallbacks",
+  "_speed": {
+    "max_tokens": 2048,
+    "extract_timeout_sec": 30,
+    "extract_cache_ttl_sec": 3600,
+    "extract_cache_max": 256,
+    "coalesce_default_profile": "default",
+    "coalesce_profile_by_source": {
+      "hermes": "tech",
+      "hermes_memory": "tech",
+      "feishu": "default",
+      "diary": "intimate"
+    },
+    "llm_fallbacks": [
+      {
+        "api_url": "https://api.backup-llm.com/v1",
+        "key_env": "BAIZE_LLM_KEY_BACKUP",
+        "model": "backup-model"
+      }
+    ]
+  },
+  "jev_gate": {
+    "_comment": "System One 门控体系——JevGate 是标准抽象名,代表 System One 门控协议。生产环境可通过修改 api_url 指向私有端点,输入输出与判别结构需保持协议兼容。",
+    "enabled": false,
+    "api_key": "",
+    "api_url": "https://api.typesafe.ai/v1/systemone",
+    "model": "jev-latest",
+    "threshold": 0.25,
+    "search_threshold": 0.35,
+    "timeout_sec": 1.5,
+    "proxy": "",
+    "fallback_laya_url": "https://convaiinnovations-laya-demo.hf.space/gradio_api/call/run_playground",
+    "custom_whitelist": ["my_keyword_1", "my_keyword_2"]
+  }
+}

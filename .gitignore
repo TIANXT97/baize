@@ -32,3 +32,6 @@ build/
 *.swp
 *.bak*
 backups/
+*.orig
+TASK_*.md
+EVALUATION_*.md

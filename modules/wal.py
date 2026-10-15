@@ -34,7 +34,7 @@ class WALEngine:
     def _archive_path(self) -> str:
         """Generate unique timestamped archive path next to the live WAL.
         
-        Qwen 3.8 Max 补丁：毫秒时间戳 + 随机串，防止重名覆盖历史归档。
+        毫秒时间戳 + 随机串，防止重名覆盖历史归档。
         """
         import uuid
         base = Path(self.wal_path)
@@ -61,7 +61,7 @@ class WALEngine:
                     except OSError as fe:
                         log.warning(f"WAL fsync warning: {fe}")
         except Exception as e:
-            # Qwen 3.8 Max 补丁：Fail-open 记录日志，绝不抛出阻断业务线程
+            # Fix: Fail-open 记录日志，绝不抛出阻断业务线程
             log.error(f"WAL append failed (fail-open): {e}")
 
     def mark_complete(self, operation: str, data: Dict) -> None:
@@ -83,7 +83,7 @@ class WALEngine:
                     except OSError as fe:
                         log.warning(f"WAL fsync warning: {fe}")
         except Exception as e:
-            # Qwen 3.8 Max 补丁：Fail-open 记录日志，销账异常绝不反向拖垮已成功的业务
+            # Fix: Fail-open 记录日志，销账异常绝不反向拖垮已成功的业务
             log.error(f"WAL mark_complete failed (fail-open): {e}")
 
     def _maybe_rotate_locked(self) -> None:
@@ -99,7 +99,7 @@ class WALEngine:
         archive = self._archive_path()
         os.replace(self.wal_path, archive)
         
-        # Qwen 3.8 Max 补丁：目录元数据 fsync 同步，防止断电目录项损坏
+        # Fix: 目录元数据 fsync 同步，防止断电目录项损坏
         try:
             dir_fd = os.open(os.path.dirname(self.wal_path) or ".", os.O_RDONLY)
             try:

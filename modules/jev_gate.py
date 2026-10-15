@@ -29,6 +29,10 @@ class JevGate:
         self.timeout_sec = float(config.get("timeout_sec", 1.5))
         self.proxy = config.get("proxy", "").strip()
         self.fallback_laya_url = config.get("fallback_laya_url", "").strip()
+        self.jargon_keywords = tuple(
+            k.lower() for k in ("baize", "api_key", "config", "port")
+            + tuple(config.get("custom_whitelist", []))
+        )
 
         # Backup Gate 支持 (例如 Drex v2.0 作为静默热备)
         backup_cfg = backup_config or {}
@@ -92,14 +96,14 @@ class JevGate:
             (True, reason)  — 确定为废话，可过滤
             (False, reason) — 保留，应走提取链
         """
-        # Qwen 3.8 Max 补丁：enabled=False 绝对短路
+        # Fix: enabled=False 绝对短路
         if not self.enabled:
             return (False, "jev_disabled_fail_open")
 
         if not self.api_url or not self.api_key:
             return (False, "jev_not_configured_fail_open")
 
-        # Qwen 3.8 Max 补丁：输入类型安全防御，防 AttributeError 击穿 Fail-open
+        # Fix: 输入类型安全防御，防 AttributeError 击穿 Fail-open
         if text is None:
             return (False, "empty_passthrough")
 
@@ -124,9 +128,8 @@ class JevGate:
             return (False, "too_short_passthrough")
 
         # 垂直工程黑话极速放行，防止误杀
-        jargon_keywords = ("白泽", "10router", "drex", "jev", "nas", "7890", "hysteria", "api_key", "ssh")
         lowered = stripped.lower()
-        if any(k in lowered for k in jargon_keywords):
+        if any(k in lowered for k in self.jargon_keywords):
             return (False, "jargon_whitelist_allow")
 
         payload = {

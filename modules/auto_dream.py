@@ -89,12 +89,12 @@ class AutoDream:
                 method="POST",
             )
 
-            # Qwen 3.8 Max 补丁：防 OOM 限制 2MB 读取上限
+            # Fix: 防 OOM 限制 2MB 读取上限
             with urllib.request.urlopen(req, timeout=120) as resp:
                 raw_bytes = resp.read(2 * 1024 * 1024)
             result = json.loads(raw_bytes.decode("utf-8", "replace"))
 
-            # Qwen 3.8 Max 补丁：结构安全解包防御，防 KeyError / IndexError / TypeError 击穿
+            # Fix: 结构安全解包防御，防 KeyError / IndexError / TypeError 击穿
             if not isinstance(result, dict):
                 return None
             choices = result.get("choices")

@@ -32,7 +32,7 @@
     "threshold": 0.25,
     "search_threshold": 0.35,
     "timeout_sec": 1.5,
-    "proxy": "http://127.0.0.1:7890",
+    "proxy": "",
     "fallback_laya_url": "https://convaiinnovations-laya-demo.hf.space/gradio_api/call/run_playground"
   }
 }

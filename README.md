@@ -19,7 +19,7 @@
 
 **白泽（Bai Ze）** 是一套专为长生命周期 AI Agent（如 Hermes Agent 等）设计的**全功能私有化持久思想引擎（Thought Engine）**。
 
-它坚决拒绝传统记忆方案中“无脑向量堆积、断电即丢、检索无序、长上下文费用失控”的痼疾，深度融合了**艾宾浩斯分轨遗忘衰减、知识拓扑演化建边、Jev/Laya 双端决策智能门控、潮浪波次防抖聚合、多模型混合检索（FTS5 + Voyage int8 向量 + 图谱多跳）、WAL 预写日志物理落盘与两段式灾备**。
+它坚决拒绝传统记忆方案中“无脑向量堆积、断电即丢、检索无序、长上下文费用失控”的痼疾，集成了**分类权重指数时序衰减、知识拓扑演化建边、Jev/Laya 双端前置判别门控、Coalesce 批量防抖聚合、多模型混合检索（FTS5 + Voyage int8 向量 + 图谱多跳）、WAL 预写日志物理落盘与两段式灾备**。
 
 > **核心哲学**：  
 > *“记忆不是堆积，而是筛选；遗忘不是缺陷，而是智慧；思想不是存储，而是编织。”*
@@ -28,23 +28,23 @@
 
 ## ✨ 核心特性 (Key Features)
 
-- 🚪 **双端 System One 智能门控 (Jev Ingest & Search Dual-Gate · v1.5.3 新增 · Issue #11 起主备双门控)**:主门控 OpenJev 0.1(26B),异常或返回无效 `answers` 时自动切入备用 Drex v2.0(3B MoE)热备;
+- 🚪 **双端前置判别门控 (Jev Ingest & Search Dual-Gate · v1.5.3 起主备双门控)**:主门控 OpenJev 0.1(26B),异常或返回无效 `answers` 时自动切入备用 Drex v2.0(3B MoE)热备;
   - **写入端闲聊快筛 (Ingest Gate)**：引入 TypeSafe Jev 轻量判别模型，毫秒级拦截无价值闲聊与瞬态过渡语（`noul < 0.25`），跳过昂贵的大模型提取链，节省 70% Token 消耗并杜绝知识库水化；
-  - **召回端智能门神 (Search Gate)**：告别死板正则，主用 Jev 语义意图识别 + Laya HF 在线 Space 兜底，配合显式口令 0ms 白名单直通与 Fail-open 容灾，实现“该想时心领神会，不该想时绝不添乱”。
-- 🛡️ **四道认知防御铁壁 (Cognitive Defense & Tombstone)**：
+  - **召回端检索门控 (Search Gate)**:主用 Jev 语义意图识别 + Laya HF 在线 Space 兜底,配合关键词白名单直通(FastPath)与 Fail-open 容灾。
+- 🛡️ **认知安全与墓碑防御机制 (Cognitive Defense & Tombstone)**：
   - **Origin 身份硬隔离**：解析输入角色打标，非用户亲陈事实在代码层物理剥夺进入 `user_profile` 权限，彻底杜绝大模型推测被洗白为永久画像；
-  - **极性反转直接取代**：长句否定纠错直接判定 `replaces`（置信度 0.85），彻底破除 Jaccard 线性稀释与数学脑死亡；
+  - **极性反转直接取代**：长句否定纠错直接判定 `replaces`（置信度 0.85），通过主题词覆盖判定极性,避免长句并集稀释；
   - **被否决事实墓碑表 (rejected_values)**：废弃旧事实 SHA-256 铸入墓碑，换 ID 或微调语序也 100% 物理拦截，严防借尸还魂；
   - **生肉回灌硬熔断**：提取返回空时坚决零落盘，超过 250 字符或含角色动作描写的文本绝对拒签。
-- ⚡ **工业级排他事务与物理落盘 (P0 存储加固 · 天禄核心)**：
+- ⚡ **排他事务与物理落盘 (P0 存储加固)**：
   - `get_db(write=True)` 引入 **`BEGIN IMMEDIATE`** 提前抢占写锁，从根源消灭并发读升写的 `SQLITE_BUSY` 死锁；
   - `wal.py` 写入后注入内核级 **`os.fsync()`**，确保应用层预写日志物理落盘，免疫硬件断电与 OOM 强杀。
 - 🌊 **活跃记忆时效保底池 (Recent Pool & Over-fetching)**：初筛过采样扩容至 100 条，并新增 48 小时前 30 条关键事实保底池。v1.5.3 废除假保底分，改由 `_seat_scores` 计算与查询的真实余弦相似度；**v1.5.3-hotfix 新增**：防抖硬门槛 `MIN_SEAT_SIMILARITY = 0.15`，低于阈值不补入候选集，根治短 query 下席位挤掉真相关老事实的边界扰动。
-- ⏳ **9 轨道艾宾浩斯遗忘衰减 (9-Lane Ebbinghaus Decay)**：
+- ⏳ **分类权重指数时序衰减 (Category-aware Exponential Decay)**：
   - `identity`（身份）、`preference`（偏好）：**永久零衰减**；
   - `rule`（铁律）、`procedural`（经验）、`knowledge`（知识）：缓慢衰减；
   - `emotion`（情绪）、`general`（过渡闲聊）：平滑快速淡出。
-- 🔍 **追忆漏斗全链路透视 (Recall Funnel · search_trace)**：开放 `POST /search_trace` 端点，FTS、向量、图谱、衰减与重排五阶段耗时与候选淘汰明明白白，彻底告别“搜不到”的黑盒。
+- 🔍 **追忆漏斗全链路透视 (Recall Funnel · search_trace)**：开放 `POST /search_trace` 端点，FTS、向量、图谱、衰减与重排五阶段耗时与候选淘汰明明白白，便于定位“搜不到”的原因。
 - 🌉 **上下文压缩桥接 (Compaction Bridge)**：Hermes Agent 压缩丢弃长历史前，规则式提取工具输出与关键事实通过 `/api/ingest` 归档并**全量补齐 1024 维 Voyage 语义向量**，根除向量黑洞。
 
 ---
@@ -52,7 +52,7 @@
 ## 🏗️ 架构拓扑 (Architecture)
 
 <div align="center">
-  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.3「天禄·天眼」全景架构拓扑" width="100%" />
+  <img src="docs/assets/architecture.svg" alt="白泽 v1.5.3 全景架构拓扑" width="100%" />
 </div>
 
 <details>
@@ -67,7 +67,7 @@
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│               白泽 v1.5.3「天禄·天眼」内核架构 (TianLu Engine)          │
+│               白泽 v1.5.3内核架构 (TianLu Engine)                       │
 │                                                                        │
 │  ┌──────────────────────┐              ┌────────────────────────────┐  │
 │  │     写入与演化链路   │              │        追忆与检索链路      │  │
@@ -78,7 +78,7 @@
 │  │  Origin 角色硬标记   │              │  48h 活跃记忆保底初筛池    │  │
 │  │  (用户/助手身份隔离) │              │  (Recent Pool + 显式时效)  │  │
 │  │         │            │              │             │              │  │
-│  │  Coalesce 潮浪缓冲   │              │  FTS5 词项召回 (BM25)      │  │
+│  │  Coalesce 批量缓冲   │              │  FTS5 词项召回 (BM25)      │  │
 │  │         │            │              │  (前置过滤 superseded)     │  │
 │  │  LLM 多级降级链提取  │              │             │              │  │
 │  │  (DeepSeek/GLM/Atria)│              │  Voyage 向量余弦 (int8)    │  │
@@ -87,11 +87,11 @@
 │  │  (零事实坚决不落盘)  │              │             │              │  │
 │  │  墓碑抗体比对过滤    │              │  Knowledge 图谱多跳扩展    │  │
 │  │  (rejected_values)   │              │             │              │  │
-│  │         │            │              │  Ebbinghaus 9 轨道遗忘衰减 │  │
+│  │         │            │              │  Category Decay 分类衰减   │  │
 │  │  WAL 预写 + os.fsync │              │             │              │  │
 │  │  (物理强制落盘防丢)  │              │  Ignition 点火高置信直达   │  │
 │  │         │            │              │             │              │  │
-│  │  BEGIN IMMEDIATE 锁  │              │  Cross-Encoder 潮汐重排    │  │
+│  │  BEGIN IMMEDIATE 锁  │              │  Cross-Encoder 时序重排    │  │
 │  │  (消灭读升写死锁)    │              │             │              │  │
 │  │  极性反转演化取代    │              │  search_trace 追忆透视全开 │  │
 │  └──────────────────────┘              └────────────────────────────┘  │
@@ -166,7 +166,7 @@ memory:
 
 ## 📚 详细技术文档 (Documentation)
 
-- 📜 [白泽 v1.5.3 完整技术白皮书（天禄·天眼现役版）](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
+- 📜 [白泽 v1.5.3 完整技术白皮书](docs/whitepaper.md) — 核心系统架构、Jev/Laya 智能门控、认知防线与存储规范
 - 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.3 完整演进历史与历次架构审计结论
 
 ---

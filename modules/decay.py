@@ -32,7 +32,7 @@ class DecayManager:
             confirm_boost = min(0.2, max(0, int(confirm_count or 0)) * 0.05)
             return min(0.95, max(0.8, float(importance or 0.5)) + confirm_boost)
 
-        # Qwen 3.8 Max 补丁：时间戳安全净化，防负龄期与 exp 溢出
+        # Fix: 时间戳安全净化，防负龄期与 exp 溢出
         try:
             created = float(created_at or time.time())
             age_days = max(0.0, (time.time() - created) / 86400.0)
