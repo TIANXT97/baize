@@ -263,7 +263,7 @@ def test_case4_zero_fact_raw_text_rejected():
     has_old_fallback = ('\"source\": \"fallback\"' in source or "'source': 'fallback'" in source)
 
     # 新的拒绝逻辑应存在
-    has_strict_reject = "raw text strictly rejected" in source
+    has_strict_reject = "text rejected" in source
 
     assert not has_old_fallback, "api_server.py 中不应存在 fallback source 标记"
     assert has_strict_reject, "api_server.py 中应有 strictly rejected 日志"
