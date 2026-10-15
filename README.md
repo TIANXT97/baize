@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Framework-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
-[![Release: v1.5.3](https://img.shields.io/badge/Release-v1.6.0--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
+[![Release: v1.5.3](https://img.shields.io/badge/Release-v1.6.1--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
 [![Platform: Linux/Debian](https://img.shields.io/badge/Platform-Debian%20Native-blue.svg)](#)
 
 </div>
@@ -34,7 +34,7 @@
 - 🛡️ **认知安全与墓碑防御机制 (Cognitive Defense & Tombstone)**：
   - **Origin 身份硬隔离**：解析输入角色打标，非用户亲陈事实在代码层物理剥夺进入 `user_profile` 权限，彻底杜绝大模型推测被洗白为永久画像；
   - **极性反转直接取代**：长句否定纠错直接判定 `replaces`（置信度 0.85），通过主题词覆盖判定极性,避免长句并集稀释；
-  - **被否决事实墓碑表 (rejected_values)**：废弃旧事实 SHA-256 铸入墓碑，换 ID 或微调语序也 100% 物理拦截，严防借尸还魂；
+  - **被否决事实墓碑表 (rejected_values)**：废弃旧事实 SHA-256 铸入墓碑，对标点空白归一化哈希精准拦截，防同文变体换 ID 借尸还魂；
   - **生肉回灌硬熔断**：提取返回空时坚决零落盘，超过 250 字符或含角色动作描写的文本绝对拒签。
 - ⚡ **排他事务与物理落盘 (P0 存储加固)**：
   - `get_db(write=True)` 引入 **`BEGIN IMMEDIATE`** 提前抢占写锁，从根源消灭并发读升写的 `SQLITE_BUSY` 死锁；
@@ -52,7 +52,7 @@
 ## 🏗️ 架构拓扑 (Architecture)
 
 <div align="center">
-  <img src="docs/assets/architecture.svg" alt="白泽 v1.6.0 全景架构拓扑" width="100%" />
+  <img src="docs/assets/architecture.svg" alt="白泽 v1.6.1 全景架构拓扑" width="100%" />
 </div>
 
 <details>
@@ -67,7 +67,7 @@
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│               白泽 v1.6.0 内核架构                       │
+│               白泽 v1.6.1 内核架构                       │
 │                                                                        │
 │  ┌──────────────────────┐              ┌────────────────────────────┐  │
 │  │     写入与演化链路   │              │        追忆与检索链路      │  │
@@ -166,8 +166,8 @@ memory:
 
 ## 📚 详细技术文档 (Documentation)
 
-- 📜 [白泽 v1.6.0 架构白皮书](docs/whitepaper.md) — 核心系统架构、决策模型门控、认知安全与存储规范
-- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.6.0 完整演进历史与历次架构审计结论
+- 📜 [白泽 v1.6.1 架构白皮书](docs/whitepaper.md) — 核心系统架构、决策模型门控、认知安全与存储规范
+- 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.6.1 完整演进历史与历次架构审计结论
 
 ---
 

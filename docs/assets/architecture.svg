@@ -46,7 +46,7 @@
     <circle cx="42" cy="21" r="6" fill="#d29922" />
     <circle cx="60" cy="21" r="6" fill="#3fb950" />
     <text x="460" y="27" fill="#f0f6fc" font-size="15" font-weight="600" text-anchor="middle" letter-spacing="1">
-      白泽 v1.6.0 全景架构拓扑 (Jev Dual-Gate Architecture)
+      白泽 v1.6.1 全景架构拓扑 (Jev Dual-Gate Architecture)
     </text>
   </g>
 

@@ -861,7 +861,7 @@ def health():
     return {
         "status": "ok",
         "service": "白泽 (Bai Ze)",
-        "version": "1.6.0-baize",
+        "version": "1.6.1-baize",
         "modules": {
             "gate": True,
             "fastpath": True,
@@ -898,7 +898,7 @@ def memory_health():
             evo = {}
     return {
         "status": "ok",
-        "version": "1.6.0-baize",
+        "version": "1.6.1-baize",
         "report": {
             "lane_distribution": lane_dist,
             "state_distribution": state_dist,
