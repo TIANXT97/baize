@@ -37,7 +37,7 @@ baize-memory/
 │   └── __init__.py        # 模块导出
 ├── plugin/baize/          # Hermes MemoryProvider 原生插件
 ├── scripts/               # 运维脚本
-├── tests/                 # 综合压力测试套件（非标准 pytest）
+├── tests/                 # 综合压力套件（非标准 pytest）+ test_*.py 单元用例
 ├── docs/                  # 文档（白皮书、编年史、审计报告）
 ├── config.json            # 权威配置（含 DREX 支持注释）
 └── requirements.txt       # Python 依赖
@@ -136,6 +136,7 @@ Get-ChildItem -Recurse -Filter *.py | ForEach-Object { python -m py_compile $_.F
 
 - **测试套件**：`tests/comprehensive_stress_suite.py`（非标准 pytest）
 - **验证项**：12 线程并发 0 死锁、50 轮检索洪水自动回落、5 大跨领域事实 100% 命中
+- **检索韧性回归**：`tests/test_recall_resilience.py`（unittest 风格，NAS 侧 `python -m pytest tests/test_recall_resilience.py`），覆盖 FTS 短语低命中回退与 Recent Pool 分层配额
 
 ### 5.3 端到端验证（NAS 侧）
 
@@ -192,7 +193,7 @@ curl -X POST http://127.0.0.1:8767/search_trace \
 
 ### 7.2 防抖门槛
 
-**Recent Pool 相似度下限**（`hybrid_recall.py:402-406`）：
+**Recent Pool 相似度下限**（`hybrid_recall.py`，常量 `MIN_SEAT_SIMILARITY`）：
 - `MIN_SEAT_SIMILARITY = 0.15`
 - 低于阈值不补入候选集，根治短 query 下席位挤掉真相关老事实的边界扰动
 
@@ -251,7 +252,7 @@ curl -X POST http://127.0.0.1:8767/search_trace \
 
 ## 10. 相关文档
 
-- 📜 [白泽 v1.6.0 架构白皮书](docs/whitepaper.md) — 核心系统架构、Jev/Laya 前置判别门控、认知安全与存储规范
+- 📜 [白泽 v1.6.1 架构白皮书](docs/whitepaper.md) — 核心系统架构、Jev/Laya 前置判别门控、认知安全与存储规范
 - 📜 [全景演进与架构审计编年史](docs/CHANGELOG.md) — 涵盖 v1.0 至 v1.5.3 完整演进历史与历次架构审计结论
 - 📜 [机器级 SOP（工位）](E:\AI工具\claude-run\CLAUDE.md) — 三节点分工、SSH/Git/部署规范（仅工位机器生效）
 
