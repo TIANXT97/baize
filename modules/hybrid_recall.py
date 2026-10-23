@@ -50,6 +50,13 @@ GRAPH_WEIGHT = 0.2
 # 根治短 query（如"那个"）下 Recent Pool 席位挤掉真相关老事实的边界扰动。
 MIN_SEAT_SIMILARITY = 0.15
 
+# Issue #21: Recent Pool 分层配额 —— 高权席位 + 纯时效席位，防高 importance 记忆密集写入时挤出新记忆。
+RECENT_POOL_IMPORTANCE_SLOTS = 20
+RECENT_POOL_LATEST_SLOTS = 10
+
+# Issue #21: FTS 短语命中数低于此值且为多实体查询时，并入关键词 OR 召回，防单条元记忆阻断回退。
+FTS_PHRASE_MIN_HITS = 3
+
 
 # Fix:多路归一化与安全得分截断
 def _safe_score(val):
@@ -385,7 +392,8 @@ class HybridRecall:
 
         # 2026-09-18 第二刀：活跃记忆时效保底池（方案二 · Recent Pool）
         # 根治"最新决议文本不含查询关键词 → FTS/Vector 初筛即跌出候选集"的缺陷：
-        # 最近 48h 内按 importance DESC, id DESC 的前 30 条活跃记忆无条件补入候选集。
+        # 最近 48h 内的 30 条活跃记忆无条件补入候选集：20 席按 importance DESC, id DESC，
+        # 10 席按 id DESC（Issue #21：纯时效保底，不受 importance 压制）。
         #
         # 2026-09-23 v4 改判：席位=纯准入，保底基准分（importance*0.4）废除。
         # 旧制下补入条目拿 0.36 保底 + 0.25 加法 = 0.61 双计分墙，把相关度 0.808
@@ -405,17 +413,33 @@ class HybridRecall:
             conn.execute("PRAGMA mmap_size = 0")
             conn.row_factory = sqlite3.Row
             try:
-                recent_rows = conn.execute(
-                    """SELECT id, content, category, lane, importance, created_at,
+                pool_sql = """SELECT id, content, category, lane, importance, created_at,
                               access_count, confirm_count
                        FROM memories
                        WHERE user_id = ? AND created_at >= REPLACE(?, 'T', ' ')
                          AND NOT EXISTS (SELECT 1 FROM memory_states WHERE memory_id = memories.id AND state = 'superseded')
-                       ORDER BY importance DESC, id DESC LIMIT 30""",
-                    (user_id, cutoff),
+                       ORDER BY {order} LIMIT ?"""
+                top_rows = conn.execute(
+                    pool_sql.format(order="importance DESC, id DESC"),
+                    (user_id, cutoff, RECENT_POOL_IMPORTANCE_SLOTS),
+                ).fetchall()
+                # Issue #21: 取 LIMIT 总席位数，确保跳过与高权席位重叠项后仍能填满时效席位
+                latest_rows = conn.execute(
+                    pool_sql.format(order="id DESC"),
+                    (user_id, cutoff, RECENT_POOL_IMPORTANCE_SLOTS + RECENT_POOL_LATEST_SLOTS),
                 ).fetchall()
             finally:
                 conn.close()
+            top_ids = {row["id"] for row in top_rows}
+            recent_rows = list(top_rows)
+            latest_taken = 0
+            for row in latest_rows:
+                if latest_taken >= RECENT_POOL_LATEST_SLOTS:
+                    break
+                if row["id"] in top_ids:
+                    continue
+                recent_rows.append(row)
+                latest_taken += 1
             seat_new = [row for row in recent_rows if row["id"] not in results]
             seat_map = self._seat_scores(query, [r["id"] for r in seat_new])
             # Issue #2: 防抖硬门槛——当 sim < MIN_SEAT_SIMILARITY（模块级常量）时不补入候选集。
@@ -644,6 +668,7 @@ class HybridRecall:
                 # 1. 优先尝试精确短语匹配 content : "{escaped}"
                 # 2. 若精确短语为 0 命中（常见于自然语言长句），自动回退为关键词/词元 OR 召回，
                 #    彻底消除长句提问时 FTS 候选恒为 0 导致的单引擎跛脚问题。
+                multi_entity = False
                 if ":" in q:
                     fts_query = q
                     fts_candidates = [fts_query]
@@ -672,12 +697,13 @@ class HybridRecall:
                         fallback_clause = ' OR '.join(f'"{t}"' for t in top_terms)
                         fallback_query = f'content : ({fallback_clause})'
                         fts_candidates = [phrase_query, fallback_query]
+                        multi_entity = len(top_terms) >= 2
                     else:
                         fts_candidates = [phrase_query]
 
                 total_hits = 0
                 fts_query = fts_candidates[0]
-                for candidate_query in fts_candidates:
+                for cand_idx, candidate_query in enumerate(fts_candidates):
                     cnt = cur.execute(
                         """SELECT count(*) FROM memories_fts f
                            JOIN memories m ON f.rowid = m.id
@@ -688,6 +714,10 @@ class HybridRecall:
                     if cnt > 0:
                         total_hits = cnt
                         fts_query = candidate_query
+                        # Issue #21: 短语仅零星命中（如单条元记忆）时不切断回退通道；
+                        # 关键词 OR 是短语的超集，BM25 仍会把短语命中项排在前面。
+                        if cand_idx == 0 and multi_entity and cnt < FTS_PHRASE_MIN_HITS:
+                            continue
                         break
 
                 if not total_hits:
