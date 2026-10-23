@@ -2,6 +2,13 @@
 
 ## 编年总表（Architecture Changelog）
 
+### 【v1.6.1-hotfix】检索层临界共振缺陷整改 2026-10-23（Issue #21）
+- **动刀背景**: 10-23 每日金丝雀巡检召回红牌，底层链路（提取/向量/余弦）全程健康，根因定位为检索层两处边界缺陷。
+- **核心改造**:
+  1. **[FTS5 短语命中不再阻断关键词回退 · Issue #21]**: `hybrid_recall.py` `_fts_search` 两段式逻辑原先在短语命中数 `> 0` 时即终止回退，单条偶然命中的元记忆会扼杀关键词 OR 召回。现新增 `FTS_PHRASE_MIN_HITS = 3`：多实体查询（≥2 个分词）且短语命中数低于该值时，继续尝试关键词 OR。关键词 OR 是短语匹配的超集，BM25 仍会把短语命中项排在前面，无需额外合并去重。
+  2. **[Recent Pool 分层配额 · Issue #21]**: 30 个席位拆分为 `RECENT_POOL_IMPORTANCE_SLOTS = 20`（`importance DESC, id DESC`）+ `RECENT_POOL_LATEST_SLOTS = 10`（`id DESC`，纯时效，不受 importance 压制），按 id 去重，时效席位在跳过重叠项后仍补满。高密度写入 0.9 记忆时，0.8 / 0.7 的新记忆不再被整体挤出。`MIN_SEAT_SIMILARITY` 防抖门槛保持不变。
+- **质量与测试交付**: 新增 `tests/test_recall_resilience.py`（5 项用例：单条元记忆不阻断回退 / 足量短语命中保持纯短语 / 零命中仍回退 / 低权新记忆保住席位 / 小池无重复）。工位仅做 `py_compile` 与 `pytest --collect-only`，真实执行待 NAS 验证。
+
 ### 【v1.6.1】核心数据安全与模块契约闭环整改 2026-10-15
 - **核心改造**:
   1. **[启动建表时序前置]**: `api_server.py` 将 `memory_states`、`knowledge_evolution`、`merge_suggestions` 等全量基础表统一收敛至 `init_db()` 中创建，确保表先于索引就位，彻底杜绝空库首次启动报 `no such table` 崩溃。

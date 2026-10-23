@@ -196,6 +196,14 @@ curl -X POST http://127.0.0.1:8767/search_trace \
 - `MIN_SEAT_SIMILARITY = 0.15`
 - 低于阈值不补入候选集，根治短 query 下席位挤掉真相关老事实的边界扰动
 
+**Recent Pool 分层配额**（`hybrid_recall.py`，Issue #21）：
+- `RECENT_POOL_IMPORTANCE_SLOTS = 20`（`importance DESC, id DESC`）+ `RECENT_POOL_LATEST_SLOTS = 10`（`id DESC`），按 id 去重
+- 防止高密度写入高 importance 记忆时，低一档的新记忆被整体挤出保底池
+
+**FTS 短语回退门槛**（`hybrid_recall.py:_fts_search`，Issue #21）：
+- `FTS_PHRASE_MIN_HITS = 3`：多实体查询的短语命中数低于该值时继续走关键词 OR（OR 是短语的超集，不会丢结果）
+- 改动会影响 `total_hits`，进而影响 `hit_factor` / `rank_norm`，调参前先看 FTS 分值量纲
+
 ### 7.3 降级事实生命周期
 
 **raw_fallback 过期机制**（`api_server.py:480` + `auto_dream.py:_cleanup_expired_fallbacks`）：
