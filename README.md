@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Framework-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
-[![Release: v1.5.3](https://img.shields.io/badge/Release-v1.6.1--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
+[![Release: v1.6.1](https://img.shields.io/badge/Release-v1.6.1--baize-brightgreen.svg)](https://github.com/TIANXT97/baize)
 [![Platform: Linux/Debian](https://img.shields.io/badge/Platform-Debian%20Native-blue.svg)](#)
 
 </div>

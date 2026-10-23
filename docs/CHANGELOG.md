@@ -1,4 +1,4 @@
-# 📜 白泽记忆系统 · 全景演进与架构审计编年史（v1.0 ~ v1.6.0）
+# 📜 白泽记忆系统 · 全景演进与架构审计编年史（v1.0 ~ v1.6.1）
 
 ## 编年总表（Architecture Changelog）
 
@@ -7,7 +7,8 @@
 - **核心改造**:
   1. **[FTS5 短语命中不再阻断关键词回退 · Issue #21]**: `hybrid_recall.py` `_fts_search` 两段式逻辑原先在短语命中数 `> 0` 时即终止回退，单条偶然命中的元记忆会扼杀关键词 OR 召回。现新增 `FTS_PHRASE_MIN_HITS = 3`：多实体查询（≥2 个分词）且短语命中数低于该值时，继续尝试关键词 OR。关键词 OR 是短语匹配的超集，BM25 仍会把短语命中项排在前面，无需额外合并去重。
   2. **[Recent Pool 分层配额 · Issue #21]**: 30 个席位拆分为 `RECENT_POOL_IMPORTANCE_SLOTS = 20`（`importance DESC, id DESC`）+ `RECENT_POOL_LATEST_SLOTS = 10`（`id DESC`，纯时效，不受 importance 压制），按 id 去重，时效席位在跳过重叠项后仍补满。高密度写入 0.9 记忆时，0.8 / 0.7 的新记忆不再被整体挤出。`MIN_SEAT_SIMILARITY` 防抖门槛保持不变。
-- **质量与测试交付**: 新增 `tests/test_recall_resilience.py`（5 项用例：单条元记忆不阻断回退 / 足量短语命中保持纯短语 / 零命中仍回退 / 低权新记忆保住席位 / 小池无重复）。工位仅做 `py_compile` 与 `pytest --collect-only`，真实执行待 NAS 验证。
+- **质量与测试交付**: 新增 `tests/test_recall_resilience.py`（5 项用例：单条元记忆不阻断回退 / 足量短语命中保持纯短语 / 零命中仍回退 / 低权新记忆保住席位 / 小池无重复）。工位侧做 `py_compile` 与 `pytest --collect-only` 静态检查，真实执行由夭夭在 NAS 侧验证后合并（PR #22）。
+- **已知影响**: 短语命中不足时 `total_hits` 变大，`hit_factor` 与 `rank_norm` 随之变化，这类查询的 FTS 分数量纲会有偏移；短语命中 ≥ 3 条、单词查询、含冒号的显式列查询、不足 3 字符的 LIKE 路径行为不变。
 
 ### 【v1.6.1】核心数据安全与模块契约闭环整改 2026-10-15
 - **核心改造**:

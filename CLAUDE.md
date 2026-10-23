@@ -10,7 +10,7 @@
 
 **白泽（Bai Ze）** — 面向 AI Agent 的私有持久化思想引擎 / 长期记忆中枢。
 单进程 FastAPI + SQLite（WAL）+ 文件 WAL，**零外部依赖**（无 JVM / Milvus / Neo4j / Redis）。
-v1.6.0，生产端口 `8767`，日常 RSS ~80MB（6.6 万事实 + 3.2 万 INT8 向量）。
+v1.6.1，生产端口 `8767`，日常 RSS ~80MB（6.6 万事实 + 3.2 万 INT8 向量）。
 
 ## 2. 怎么跑 / 怎么验（仅 NAS/Linux 侧，工位不跑）
 
@@ -50,7 +50,7 @@ curl -X POST http://127.0.0.1:8767/search_trace \
 
 - `AGENTS.md` — 项目通用 AI agent 工作指南（组织/机制/审核 checklist/陷阱）
 - `docs/whitepaper.md` — 技术白皮书（架构、门控、防线、存储）
-- `docs/CHANGELOG.md` — v1.0 → v1.5.3 演进与审计编年史
+- `docs/CHANGELOG.md` — v1.0 → v1.6.1 演进与审计编年史
 - `docs/AUDIT_*.md` — 历次架构审计报告（含"不要分布式"裁定的原始依据）
 
 ---
